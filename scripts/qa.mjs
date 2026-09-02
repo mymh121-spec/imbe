@@ -149,8 +149,39 @@ try {
   if (!waveform?.includes('사각파')) throw new Error(`Waveform selection did not activate: ${waveform}`);
   const baseTone = await page.locator('.track-header b').first().textContent();
   if (!baseTone?.includes('440')) throw new Error(`Base synth tone is not 440 Hz: ${baseTone}`);
-  const tutorialSteps = await page.locator('.motion-tutorial li').count();
-  if (tutorialSteps !== 6) throw new Error(`Motion tutorial is incomplete: ${tutorialSteps} steps`);
+  await page.waitForFunction(() => {
+    const meter = document.querySelector('.audio-master > .meter i');
+    return meter instanceof HTMLElement && Number.parseFloat(meter.style.width) > 1;
+  });
+  const audibleMeter = await page.locator('.audio-master > .meter i').evaluate((meter) => Number.parseFloat(meter.style.width));
+  await page.getByRole('button', { name: '크레센도', exact: true }).click();
+  const crescendoLevel = await page.locator('.motion-tutorial .waveform-label b').textContent();
+  if (crescendoLevel !== '80%') throw new Error(`Crescendo did not raise dynamics: ${crescendoLevel}`);
+  await page.getByRole('button', { name: '디크레센도', exact: true }).click();
+  const decrescendoLevel = await page.locator('.motion-tutorial .waveform-label b').textContent();
+  if (decrescendoLevel !== '70%') throw new Error(`Decrescendo did not lower dynamics: ${decrescendoLevel}`);
+
+  const muteButton = page.locator('.dynamics-actions button').nth(1);
+  await muteButton.click();
+  await page.waitForTimeout(220);
+  const muteState = await muteButton.getAttribute('aria-pressed');
+  const mutedMaster = await page.locator('.master-values b').first().textContent();
+  const mutedMeter = await page.locator('.audio-master > .meter i').evaluate((meter) => Number.parseFloat(meter.style.width));
+  if (muteState !== 'true' || mutedMaster !== 'MUTE' || mutedMeter > 2) {
+    throw new Error(`Mute did not activate: ${muteState}, ${mutedMaster}, meter ${mutedMeter}`);
+  }
+  await muteButton.click();
+  await page.waitForFunction(() => {
+    const meter = document.querySelector('.audio-master > .meter i');
+    return meter instanceof HTMLElement && Number.parseFloat(meter.style.width) > 1;
+  });
+
+  await page.getByRole('button', { name: '템포 높이기' }).click();
+  const tempo = await page.locator('.tutorial-adjust-row').first().locator('output').textContent();
+  if (tempo !== '110 BPM') throw new Error(`Tempo did not increase: ${tempo}`);
+  await page.getByRole('button', { name: '왼쪽 소리 가중치 높이기' }).click();
+  const balance = await page.locator('.tutorial-adjust-row').nth(1).locator('output').textContent();
+  if (balance !== 'L 20%') throw new Error(`Left balance did not increase: ${balance}`);
 
   await page.getByRole('button', { name: '카메라 켜기' }).click();
   await page.waitForTimeout(800);
@@ -193,7 +224,7 @@ try {
   if (runtimeErrors.length || responseErrors.length) {
     throw new Error(`Runtime errors: ${[...runtimeErrors, ...responseErrors].join(' | ')}`);
   }
-  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, waveform, baseTone, tutorialSteps, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
+  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, waveform, baseTone, audibleMeter, crescendoLevel, decrescendoLevel, muteState, mutedMeter, tempo, balance, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
 } finally {
   await browser.close();
 }

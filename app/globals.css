@@ -162,11 +162,19 @@ button:disabled { cursor: not-allowed; }
 .waveform-buttons button svg { width: 13px; height: 13px; flex: 0 0 auto; }
 .waveform-buttons button.active { border-color: #6cc9ff; color: #081116; background: #6cc9ff; }
 .motion-tutorial { min-width: 0; padding-left: 12px; border-left: 1px solid #2a3840; }
-.motion-tutorial ul { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; margin: 0; padding: 0; list-style: none; }
-.motion-tutorial li { min-width: 0; display: grid; grid-template-columns: 14px minmax(0, auto); align-items: center; column-gap: 5px; }
-.motion-tutorial li svg { width: 12px; height: 12px; grid-row: 1 / span 2; color: #6cc9ff; }
-.motion-tutorial li b { overflow: hidden; color: #c1cdd2; font-size: 8px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.motion-tutorial li span { overflow: hidden; color: #71838d; font: 500 7px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.dynamics-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.dynamics-actions button { min-width: 0; height: 44px; display: grid; grid-template-columns: 14px minmax(0, 1fr); grid-template-rows: 18px 12px; align-items: center; padding: 4px 5px; border: 1px solid #30414a; color: #b9c6cc; background: #121b20; border-radius: 4px; }
+.dynamics-actions button svg { width: 13px; height: 13px; grid-row: 1 / span 2; color: #6cc9ff; }
+.dynamics-actions button b { overflow: hidden; font: 700 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.dynamics-actions button small { overflow: hidden; color: #71838d; font: 600 6px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.dynamics-actions button.active { border-color: #e7563b; color: #fff; background: #401b18; }
+.dynamics-actions button.active svg, .dynamics-actions button.active small { color: #ff8a74; }
+.dynamics-actions button:disabled, .tutorial-adjust-row button:disabled { cursor: default; opacity: 0.35; }
+.tutorial-adjust-row { min-width: 0; display: grid; grid-template-columns: 48px 25px minmax(48px, 1fr) 25px; align-items: center; gap: 3px; margin-top: 5px; }
+.tutorial-adjust-row > span { overflow: hidden; color: #71838d; font: 700 7px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.tutorial-adjust-row button { width: 25px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid #30414a; color: #6cc9ff; background: #121b20; border-radius: 3px; }
+.tutorial-adjust-row button svg { width: 12px; height: 12px; }
+.tutorial-adjust-row output { min-width: 0; overflow: hidden; color: #d7e0e4; font: 650 8px var(--font-mono); text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .meter { height: 5px; display: block; overflow: hidden; background: #25333a; border-radius: 2px; }
 .meter i { display: block; height: 100%; border-radius: inherit; transition: width 80ms linear; }
 .tone-cyan i { background: #6cc9ff; }

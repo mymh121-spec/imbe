@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, AudioLines, Camera, CameraOff, Crosshair, Eye, EyeOff, FileAudio,
-  Gauge, Hand, Move3d, MoveHorizontal, MoveVertical, MousePointer2, Pause, Play,
-  Printer, Radio, Repeat2, Rotate3d, ScanLine, Square, TestTube2, Triangle,
-  Upload, Waves, Zap,
+  ChevronLeft, ChevronRight, Hand, Minus, MousePointer2, Pause, Play, Plus,
+  Printer, Radio, Repeat2, ScanLine, Square, TestTube2, Triangle, Upload,
+  Volume2, VolumeX, Waves,
 } from 'lucide-react';
 import { BatonStage } from '@/components/baton-stage';
 import { Button } from '@/components/ui/button';
@@ -126,6 +126,10 @@ export default function Home() {
   const [calibrationMessage, setCalibrationMessage] = useState('영점 미설정');
   const [playback, setPlayback] = useState<AudioPlaybackState>('stopped');
   const [waveform, setWaveform] = useState<SynthWaveform>('sine');
+  const [dynamicsLevel, setDynamicsLevel] = useState(0.7);
+  const [muted, setMuted] = useState(false);
+  const [tempoBpm, setTempoBpm] = useState(100);
+  const [manualPan, setManualPan] = useState(0);
   const [loop, setLoop] = useState(true);
   const [trackInfo, setTrackInfo] = useState([
     { name: 'A4 Base 440', level: 0.34, hasFile: false },
@@ -353,6 +357,43 @@ export default function Home() {
     setTrackInfo(audioRef.current?.getTrackInfo() ?? trackInfo);
   };
 
+  const adjustDynamics = (delta: number) => {
+    setDynamicsLevel((current) => {
+      const next = Math.min(1, Math.max(0, Number((current + delta).toFixed(1))));
+      audioRef.current?.setDynamicsLevel(next);
+      return next;
+    });
+  };
+
+  const toggleMute = () => {
+    setMuted((current) => {
+      const next = !current;
+      audioRef.current?.setMuted(next);
+      return next;
+    });
+  };
+
+  const adjustTempo = (delta: number) => {
+    setTempoBpm((current) => {
+      const next = Math.min(180, Math.max(60, current + delta));
+      audioRef.current?.setTempoBpm(next);
+      return next;
+    });
+  };
+
+  const adjustBalance = (delta: number) => {
+    setManualPan((current) => {
+      const next = Math.min(1, Math.max(-1, Number((current + delta).toFixed(1))));
+      audioRef.current?.setManualPan(next);
+      return next;
+    });
+  };
+
+  const balanceLabel = manualPan === 0
+    ? 'CENTER'
+    : manualPan < 0 ? `L ${Math.round(-manualPan * 100)}%` : `R ${Math.round(manualPan * 100)}%`;
+  const effectivePan = Math.min(1, Math.max(-1, mapped.pan + manualPan));
+
   const cameraTrackingActive = trackingMode === 'hand' ? handDetected : markerIds.length > 0;
   const handTrackingLabel = handDetected
     ? `${handedness === 'Left' ? '왼손' : handedness === 'Right' ? '오른손' : '손'} 추적 중`
@@ -518,16 +559,31 @@ export default function Home() {
                     <button className={waveform === 'square' ? 'active' : ''} onClick={() => void selectWaveform('square')}><Square />사각파</button>
                   </div>
                 </div>
-                <aside className="motion-tutorial" aria-label="지휘 동작 튜토리얼">
-                  <span className="waveform-label">MOTION TUTORIAL</span>
-                  <ul>
-                    <li><MoveHorizontal /><b>좌우</b><span>패닝</span></li>
-                    <li><MoveVertical /><b>상하</b><span>저음·고음 EQ</span></li>
-                    <li><Move3d /><b>거리</b><span>전체 음량</span></li>
-                    <li><Rotate3d /><b>기울기</b><span>EQ 강도</span></li>
-                    <li><Gauge /><b>빠른 이동</b><span>반응 강도</span></li>
-                    <li><Zap /><b>급정지</b><span>감쇠·일시정지</span></li>
-                  </ul>
+                <aside className="motion-tutorial" aria-label="수동 오디오 동작">
+                  <span className="waveform-label">ACTION TUTORIAL <b>{Math.round(dynamicsLevel * 100)}%</b></span>
+                  <div className="dynamics-actions">
+                    <button aria-label="디크레센도" onClick={() => adjustDynamics(-0.1)} disabled={dynamicsLevel <= 0}>
+                      <ChevronLeft /><b>&lt;</b><small>DECRESC.</small>
+                    </button>
+                    <button className={muted ? 'active mute' : ''} aria-label={muted ? '음소거 해제' : '음소거'} aria-pressed={muted} onClick={toggleMute}>
+                      {muted ? <VolumeX /> : <Volume2 />}<b>MUTE</b><small>{muted ? 'ON' : 'OFF'}</small>
+                    </button>
+                    <button aria-label="크레센도" onClick={() => adjustDynamics(0.1)} disabled={dynamicsLevel >= 1}>
+                      <ChevronRight /><b>&gt;</b><small>CRESC.</small>
+                    </button>
+                  </div>
+                  <div className="tutorial-adjust-row">
+                    <span>TEMPO</span>
+                    <button aria-label="템포 낮추기" onClick={() => adjustTempo(-10)} disabled={tempoBpm <= 60}><Minus /></button>
+                    <output>{tempoBpm} BPM</output>
+                    <button aria-label="템포 높이기" onClick={() => adjustTempo(10)} disabled={tempoBpm >= 180}><Plus /></button>
+                  </div>
+                  <div className="tutorial-adjust-row">
+                    <span>BALANCE</span>
+                    <button aria-label="왼쪽 소리 가중치 높이기" onClick={() => adjustBalance(-0.2)} disabled={manualPan <= -1}><ChevronLeft /></button>
+                    <output>{balanceLabel}</output>
+                    <button aria-label="오른쪽 소리 가중치 높이기" onClick={() => adjustBalance(0.2)} disabled={manualPan >= 1}><ChevronRight /></button>
+                  </div>
                 </aside>
               </div>
               <Meter value={audioMeter} tone="coral" />
@@ -537,8 +593,8 @@ export default function Home() {
                 <Button variant="outline" onClick={() => void selectWaveform('sine')}><TestTube2 data-icon="inline-start" />테스트톤</Button>
               </div>
               <div className="master-values">
-                <span><small>MASTER</small><b>{Math.round(mapped.masterGain * 100)}%</b></span>
-                <span><small>PAN</small><b>{numberText(mapped.pan)}</b></span>
+                <span><small>MASTER</small><b>{muted ? 'MUTE' : `${Math.round(mapped.masterGain * dynamicsLevel * 100)}%`}</b></span>
+                <span><small>PAN</small><b>{numberText(effectivePan)}</b></span>
               </div>
             </div>
 
