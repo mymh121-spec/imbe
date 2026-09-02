@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AR } from 'js-aruco';
 import { markerMatrix, markerSvg } from '../modules/calibration';
+import { computeCameraBatonOverlay } from '../modules/markerDetection';
 
 describe('ArUco marker generation', () => {
   it('creates a 7x7 marker with a solid black border', () => {
@@ -51,5 +52,41 @@ describe('ArUco marker generation', () => {
     }));
     const detections = new AR.Detector().detect({ width, height: width, data } as ImageData);
     expect(detections.map((marker) => marker.id)).toContain(id);
+  });
+});
+
+describe('camera baton overlay', () => {
+  it('uses the marker center as its anchor and the marker top as its direction', () => {
+    const overlay = computeCameraBatonOverlay([{
+      id: 0,
+      corners: [
+        { x: 10, y: 20 },
+        { x: 30, y: 20 },
+        { x: 30, y: 40 },
+        { x: 10, y: 40 },
+      ],
+    }]);
+
+    expect(overlay).not.toBeNull();
+    expect(overlay?.anchor).toEqual({ x: 20, y: 30 });
+    expect(overlay?.direction.x).toBeCloseTo(0);
+    expect(overlay?.direction.y).toBeCloseTo(-1);
+    expect(overlay?.markerSize).toBeCloseTo(20);
+  });
+
+  it('averages multiple marker centers into one hand anchor', () => {
+    const overlay = computeCameraBatonOverlay([
+      {
+        id: 0,
+        corners: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }],
+      },
+      {
+        id: 1,
+        corners: [{ x: 40, y: 0 }, { x: 60, y: 0 }, { x: 60, y: 20 }, { x: 40, y: 20 }],
+      },
+    ]);
+
+    expect(overlay?.anchor).toEqual({ x: 30, y: 10 });
+    expect(overlay?.direction.y).toBeCloseTo(-1);
   });
 });

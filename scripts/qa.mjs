@@ -19,6 +19,54 @@ const browser = await chromium.launch({
 
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage();
+await page.addInitScript(() => {
+  const cameraCanvas = document.createElement('canvas');
+  cameraCanvas.width = 640;
+  cameraCanvas.height = 480;
+  const cameraContext = cameraCanvas.getContext('2d');
+  const rowPatterns = [
+    [1, 0, 0, 0, 0],
+    [1, 0, 1, 1, 1],
+    [0, 1, 0, 0, 1],
+    [0, 1, 1, 1, 0],
+  ];
+
+  function markerMatrix(id) {
+    const matrix = Array.from({ length: 7 }, () => Array(7).fill(0));
+    for (let row = 0; row < 5; row += 1) {
+      const first = (id >> (9 - row * 2)) & 1;
+      const second = (id >> (8 - row * 2)) & 1;
+      matrix[row + 1].splice(1, 5, ...rowPatterns[(first << 1) | second]);
+    }
+    return matrix;
+  }
+
+  function drawMarker(id, x, y, cell = 12) {
+    cameraContext.fillStyle = '#ffffff';
+    cameraContext.fillRect(x, y, cell * 9, cell * 9);
+    cameraContext.fillStyle = '#000000';
+    cameraContext.fillRect(x + cell, y + cell, cell * 7, cell * 7);
+    const matrix = markerMatrix(id);
+    matrix.forEach((row, markerY) => row.forEach((value, markerX) => {
+      if (!value) return;
+      cameraContext.fillStyle = '#ffffff';
+      cameraContext.fillRect(x + (markerX + 1) * cell, y + (markerY + 1) * cell, cell, cell);
+    }));
+  }
+
+  function drawCameraFrame(now = 0) {
+    const offset = Math.sin(now / 500) * 34;
+    cameraContext.fillStyle = '#d8dde0';
+    cameraContext.fillRect(0, 0, cameraCanvas.width, cameraCanvas.height);
+    drawMarker(0, 125 + offset, 275);
+    drawMarker(1, 365 + offset, 275);
+    drawMarker(2, 245 + offset, 115);
+    requestAnimationFrame(drawCameraFrame);
+  }
+  drawCameraFrame();
+
+  navigator.mediaDevices.getUserMedia = async () => cameraCanvas.captureStream(30);
+});
 const runtimeErrors = [];
 const responseErrors = [];
 page.on('pageerror', (error) => runtimeErrors.push(error.message));
@@ -52,6 +100,23 @@ async function canvasStats() {
   });
 }
 
+async function cameraOverlayStats() {
+  return page.locator('.camera-preview canvas').evaluate((canvas) => {
+    const context2d = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context2d) return { width: canvas.width, height: canvas.height, swordPixels: 0 };
+    const pixels = context2d.getImageData(0, 0, canvas.width, canvas.height).data;
+    let swordPixels = 0;
+    for (let y = 0; y < Math.min(105, canvas.height); y += 1) {
+      for (let x = Math.floor(canvas.width * 0.32); x < Math.floor(canvas.width * 0.68); x += 1) {
+        const offset = (y * canvas.width + x) * 4;
+        const [red, green, blue] = [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
+        if (blue > 190 && green > 145 && red < 190) swordPixels += 1;
+      }
+    }
+    return { width: canvas.width, height: canvas.height, swordPixels };
+  });
+}
+
 try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.locator('.baton-stage canvas').waitFor({ state: 'visible' });
@@ -76,9 +141,16 @@ try {
   if (await page.getByRole('button', { name: '일시정지' }).isDisabled()) throw new Error('Audio playback did not enter playing state');
 
   await page.getByRole('button', { name: '카메라 켜기' }).click();
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(1600);
   const cameraState = await page.locator('.status-list dd').first().textContent();
   if (!cameraState?.includes('준비')) throw new Error(`Camera did not reach ready state: ${cameraState}`);
+
+  const markerReadout = await page.locator('.status-list dd').nth(1).textContent();
+  if (!markerReadout?.includes('0') || !markerReadout.includes('1') || !markerReadout.includes('2')) {
+    throw new Error(`Virtual camera markers were not detected: ${markerReadout}`);
+  }
+  const cameraOverlay = await cameraOverlayStats();
+  if (cameraOverlay.swordPixels < 120) throw new Error(`Camera sword overlay is missing: ${JSON.stringify(cameraOverlay)}`);
 
   await page.screenshot({ path: `${resultsDir}/desktop.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -96,7 +168,7 @@ try {
   if (runtimeErrors.length || responseErrors.length) {
     throw new Error(`Runtime errors: ${[...runtimeErrors, ...responseErrors].join(' | ')}`);
   }
-  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, cameraState, runtimeErrors, responseErrors }, null, 2));
+  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, cameraState, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
 } finally {
   await browser.close();
 }
