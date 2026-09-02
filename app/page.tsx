@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, AudioLines, Camera, CameraOff, Crosshair, Eye, EyeOff, FileAudio,
-  ChevronLeft, ChevronRight, Hand, Minus, MousePointer2, Pause, Play, Plus,
-  Printer, Radio, Repeat2, ScanLine, Square, TestTube2, Triangle, Upload,
+  ChevronLeft, ChevronRight, Minus, MousePointer2, Pause, Play, Plus,
+  Radio, Repeat2, Square, TestTube2, Triangle, Upload,
   Volume2, VolumeX, Waves,
 } from 'lucide-react';
 import { BatonStage } from '@/components/baton-stage';
@@ -17,19 +17,13 @@ import { AudioEngine, type AudioPlaybackState, type SynthWaveform } from '@/modu
 import { BatonController } from '@/modules/batonController';
 import { BeatTracker, type BeatEvent } from '@/modules/beatTracker';
 import { CameraInput, type CameraState } from '@/modules/cameraInput';
-import {
-  CalibrationManager, DEFAULT_CALIBRATION, printMarkerSheet, type CalibrationSettings,
-} from '@/modules/calibration';
 import { DEFAULT_MAPPING, mapGesture, type MappingSettings } from '@/modules/gestureMapping';
 import { GestureCommandDetector, type ConductorCommand } from '@/modules/gestureCommands';
 import type { StaticHandGesture } from '@/modules/gestureFeatures';
 import { HandDetection, type HandDetectorState } from '@/modules/handDetection';
-import { MarkerDetection } from '@/modules/markerDetection';
-import { estimateBoardPose } from '@/modules/poseEstimation';
-import type { BatonFrame, BatonPose, BoardPose, MappingOutput } from '@/modules/types';
+import type { BatonFrame, BatonPose, MappingOutput } from '@/modules/types';
 
 type InputMode = 'simulation' | 'camera';
-type CameraTrackingMode = 'hand' | 'marker';
 
 const INITIAL_FRAME: BatonFrame = {
   position: { x: 0, y: 0, z: 0.5 },
@@ -125,20 +119,15 @@ export default function Home() {
   const previewRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<CameraInput | null>(null);
-  const detectorRef = useRef<MarkerDetection | null>(null);
   const handDetectorRef = useRef<HandDetection | null>(null);
-  const calibrationRef = useRef<CalibrationManager | null>(null);
   const controllerRef = useRef<BatonController | null>(null);
   const audioRef = useRef<AudioEngine | null>(null);
   const beatTrackerRef = useRef<BeatTracker | null>(null);
   const gestureCommandRef = useRef<GestureCommandDetector | null>(null);
   const modeRef = useRef<InputMode>('simulation');
-  const trackingModeRef = useRef<CameraTrackingMode>('hand');
   const cameraStateRef = useRef<CameraState>('off');
   const simulationPoseRef = useRef<BatonPose | null>(null);
   const cameraPoseRef = useRef<BatonPose | null>(null);
-  const lastBoardPoseRef = useRef<BoardPose | null>(null);
-  const calibrationSettingsRef = useRef<CalibrationSettings>(DEFAULT_CALIBRATION);
   const mappingSettingsRef = useRef<MappingSettings>(DEFAULT_MAPPING);
   const gestureCommandsEnabledRef = useRef(false);
   const beatSyncRef = useRef(false);
@@ -146,9 +135,7 @@ export default function Home() {
   const lastUiUpdateRef = useRef(0);
 
   const [mode, setMode] = useState<InputMode>('simulation');
-  const [trackingMode, setTrackingMode] = useState<CameraTrackingMode>('hand');
   const [cameraState, setCameraState] = useState<CameraState>('off');
-  const [markerIds, setMarkerIds] = useState<number[]>([]);
   const [handState, setHandState] = useState<HandDetectorState>('idle');
   const [handDetected, setHandDetected] = useState(false);
   const [handedness, setHandedness] = useState<string | null>(null);
@@ -164,8 +151,6 @@ export default function Home() {
   const [frame, setFrame] = useState<BatonFrame>(INITIAL_FRAME);
   const [mapped, setMapped] = useState<MappingOutput>(INITIAL_MAPPING);
   const [mappingSettings, setMappingSettings] = useState<MappingSettings>(DEFAULT_MAPPING);
-  const [calibrationSettings, setCalibrationSettings] = useState<CalibrationSettings>(DEFAULT_CALIBRATION);
-  const [calibrationMessage, setCalibrationMessage] = useState('영점 미설정');
   const [playback, setPlayback] = useState<AudioPlaybackState>('stopped');
   const [waveform, setWaveform] = useState<SynthWaveform>('sine');
   const [dynamicsLevel, setDynamicsLevel] = useState(0.7);
@@ -182,17 +167,13 @@ export default function Home() {
 
   useEffect(() => {
     const camera = new CameraInput();
-    const detector = new MarkerDetection();
     const handDetector = new HandDetection();
-    const calibration = new CalibrationManager();
     const controller = new BatonController();
     const audio = new AudioEngine();
     const beatTracker = new BeatTracker();
     const gestureCommand = new GestureCommandDetector();
     cameraRef.current = camera;
-    detectorRef.current = detector;
     handDetectorRef.current = handDetector;
-    calibrationRef.current = calibration;
     controllerRef.current = controller;
     audioRef.current = audio;
     beatTrackerRef.current = beatTracker;
@@ -252,28 +233,22 @@ export default function Home() {
           break;
       }
     };
-    const savedCalibration = calibration.getSettings();
-    calibrationSettingsRef.current = savedCalibration;
-    queueMicrotask(() => setCalibrationSettings(savedCalibration));
-
     let animationFrame = 0;
     const tick = (now: number) => {
       const activeMode = modeRef.current;
-      const activeTrackingMode = trackingModeRef.current;
       if (
         cameraStateRef.current === 'ready' &&
         videoRef.current &&
-        now - lastDetectionRef.current > (activeTrackingMode === 'hand' ? 55 : 70)
+        now - lastDetectionRef.current > 55
       ) {
         lastDetectionRef.current = now;
-        if (activeTrackingMode === 'hand' && handDetectorRef.current) {
+        if (handDetectorRef.current) {
           const detection = handDetectorRef.current.detect(videoRef.current, previewRef.current ?? undefined, now);
           if (detection) {
             setHandDetected(detection.handCount > 0);
             setHandedness(detection.handedness);
             setHandGesture(detection.gesture);
             setGestureConfidence(detection.gestureConfidence);
-            setMarkerIds([]);
             setDetectionMs(detection.durationMs);
             if (detection.pose) {
               cameraPoseRef.current = detection.pose;
@@ -290,24 +265,6 @@ export default function Home() {
               }
             } else {
               gestureCommand.update(null);
-            }
-          }
-        } else if (detectorRef.current) {
-          const detection = detectorRef.current.detect(videoRef.current, previewRef.current ?? undefined);
-          if (detection) {
-            const configured = calibrationSettingsRef.current;
-            const relevant = detection.markers.filter((marker) => configured.markers.some((item) => item.id === marker.id));
-            setMarkerIds(relevant.map((marker) => marker.id));
-            setHandDetected(false);
-            setHandGesture('unknown');
-            setGestureConfidence(0);
-            gestureCommand.reset();
-            setDetectionMs(detection.durationMs);
-            const intrinsics = calibration.getIntrinsics(detection.width, detection.height);
-            const boardPose = estimateBoardPose(relevant, configured.markers, configured.markerSizeMm, intrinsics, now);
-            if (boardPose) {
-              lastBoardPoseRef.current = boardPose;
-              cameraPoseRef.current = calibration.normalize(boardPose);
             }
           }
         }
@@ -398,28 +355,6 @@ export default function Home() {
     }
   }, []);
 
-  const changeTrackingMode = (next: CameraTrackingMode) => {
-    trackingModeRef.current = next;
-    setTrackingMode(next);
-    if (next === 'marker') {
-      gestureCommandsEnabledRef.current = false;
-      setGestureCommandsEnabled(false);
-      setLastCommand('안전 잠금');
-    }
-    setMarkerIds([]);
-    setHandDetected(false);
-    setHandedness(null);
-    setHandGesture('unknown');
-    setGestureConfidence(0);
-    gestureCommandRef.current?.reset();
-    setDetectionMs(0);
-    cameraPoseRef.current = null;
-    if (cameraStateRef.current === 'ready') {
-      changeMode('camera');
-      if (next === 'hand') void prepareHandDetector();
-    }
-  };
-
   const toggleCamera = async () => {
     const camera = cameraRef.current;
     const video = videoRef.current;
@@ -428,7 +363,6 @@ export default function Home() {
       camera.stop();
       cameraStateRef.current = 'off';
       setCameraState('off');
-      setMarkerIds([]);
       setHandDetected(false);
       setHandedness(null);
       setHandGesture('unknown');
@@ -445,7 +379,7 @@ export default function Home() {
     setCameraState(next);
     if (next === 'ready') {
       changeMode('camera');
-      if (trackingModeRef.current === 'hand') void prepareHandDetector();
+      void prepareHandDetector();
     }
   };
 
@@ -454,32 +388,6 @@ export default function Home() {
     mappingSettingsRef.current = next;
     controllerRef.current?.setSmoothing(next.smoothingHz);
     setMappingSettings(next);
-  };
-
-  const updateCalibration = (next: CalibrationSettings) => {
-    calibrationSettingsRef.current = next;
-    calibrationRef.current?.update(next);
-    setCalibrationSettings(next);
-  };
-
-  const updateMarker = (index: number, key: 'id' | 'xMm' | 'yMm' | 'rotationDeg', value: number) => {
-    const markers = calibrationSettings.markers.map((marker, markerIndex) =>
-      markerIndex === index ? { ...marker, [key]: value } : marker,
-    );
-    updateCalibration({ ...calibrationSettings, markers });
-  };
-
-  const calibrateNeutral = () => {
-    const pose = lastBoardPoseRef.current;
-    if (!pose || performance.now() - pose.timestamp > 600 || !calibrationRef.current) {
-      setCalibrationMessage('마커 보드가 필요합니다');
-      return;
-    }
-    calibrationRef.current.setNeutral(pose);
-    const next = calibrationRef.current.getSettings();
-    calibrationSettingsRef.current = next;
-    setCalibrationSettings(next);
-    setCalibrationMessage(`영점 ${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`);
   };
 
   const handlePlay = async () => {
@@ -555,7 +463,6 @@ export default function Home() {
     : manualPan < 0 ? `L ${Math.round(-manualPan * 100)}%` : `R ${Math.round(manualPan * 100)}%`;
   const effectivePan = Math.min(1, Math.max(-1, mapped.pan + manualPan));
 
-  const cameraTrackingActive = trackingMode === 'hand' ? handDetected : markerIds.length > 0;
   const handTrackingLabel = handDetected
     ? `${handedness === 'Left' ? '왼손' : handedness === 'Right' ? '오른손' : '손'} 추적 중`
     : HAND_STATE_LABELS[handState];
@@ -563,13 +470,9 @@ export default function Home() {
     ? '시뮬레이션 입력'
     : cameraState !== 'ready'
       ? CAMERA_LABELS[cameraState]
-      : trackingMode === 'hand'
-        ? handTrackingLabel
-        : markerIds.length
-          ? `${markerIds.length}개 마커 추적 중`
-          : '마커 미검출';
+      : handTrackingLabel;
 
-  const statusTone = mode === 'simulation' || cameraTrackingActive
+  const statusTone = mode === 'simulation' || handDetected
     ? 'ok'
     : cameraState === 'denied' || cameraState === 'error' || handState === 'error' ? 'error' : 'warn';
 
@@ -579,7 +482,7 @@ export default function Home() {
         <header className="topbar">
           <div className="brand-lockup">
             <span className="brand-mark" aria-hidden="true"><Radio size={18} /></span>
-            <div><h1>GESTURE CONDUCTOR</h1><p>다중 마커 3D 지휘 · 실시간 오디오 믹싱</p></div>
+            <div><h1>GESTURE CONDUCTOR</h1><p>맨손 3D 지휘 · 실시간 오디오 믹싱</p></div>
           </div>
           <div className="topbar-actions">
             <div className="mode-switch" aria-label="입력 모드">
@@ -607,7 +510,7 @@ export default function Home() {
               {[
                 ['X', numberText(frame.position.x), 'norm'],
                 ['Y', numberText(frame.position.y), 'norm'],
-                ['Z', frame.position.z.toFixed(2), 'depth'],
+                ['Z', frame.position.z.toFixed(2), 'relative'],
                 ['SPD', frame.speed.toFixed(2), 'u/s'],
                 ['TILT', `${Math.round(frame.rotation.z * 180 / Math.PI)}°`, 'roll'],
               ].map(([label, value, unit]) => (
@@ -621,19 +524,14 @@ export default function Home() {
               <TabsList className="console-tabs">
                 <TabsTrigger value="input">입력</TabsTrigger>
                 <TabsTrigger value="mapping">매핑</TabsTrigger>
-                <TabsTrigger value="calibration">보정</TabsTrigger>
               </TabsList>
 
               <TabsContent value="input" className="tab-body">
-                <div className="section-title"><div><span className="eyebrow">CAMERA</span><h2>손 · 마커 입력</h2></div><Camera size={17} /></div>
-                <div className="tracking-source-switch" aria-label="카메라 추적 방식">
-                  <button className={trackingMode === 'hand' ? 'active' : ''} aria-pressed={trackingMode === 'hand'} onClick={() => changeTrackingMode('hand')}><Hand />손 추적</button>
-                  <button className={trackingMode === 'marker' ? 'active' : ''} aria-pressed={trackingMode === 'marker'} onClick={() => changeTrackingMode('marker')}><ScanLine />마커 추적</button>
-                </div>
+                <div className="section-title"><div><span className="eyebrow">CAMERA</span><h2>맨손 입력</h2></div><Camera size={17} /></div>
                 <div className="conductor-options">
                   <div>
                     <span><b>손 명령</b><small>유지·핀치 동작 실행</small></span>
-                    <Switch aria-label="손 명령 사용" checked={gestureCommandsEnabled} disabled={trackingMode !== 'hand'} onCheckedChange={changeGestureCommandsEnabled} />
+                    <Switch aria-label="손 명령 사용" checked={gestureCommandsEnabled} onCheckedChange={changeGestureCommandsEnabled} />
                   </div>
                   <div>
                     <span><b>박자 동기화</b><small>검출 BPM을 오디오에 적용</small></span>
@@ -658,7 +556,7 @@ export default function Home() {
                 </div>
                 <dl className="status-list">
                   <div><dt>장치</dt><dd className={cameraState === 'ready' ? 'text-ok' : ''}>{CAMERA_LABELS[cameraState]}</dd></div>
-                  <div><dt>{trackingMode === 'hand' ? '손 추적' : '마커 ID'}</dt><dd>{trackingMode === 'hand' ? handTrackingLabel : markerIds.length ? markerIds.join(', ') : '없음'}</dd></div>
+                  <div><dt>손 추적</dt><dd>{handTrackingLabel}</dd></div>
                   <div><dt>손 모양</dt><dd>{GESTURE_LABELS[handGesture]} {gestureConfidence ? `${Math.round(gestureConfidence * 100)}%` : ''}</dd></div>
                   <div><dt>최근 명령</dt><dd>{lastCommand}</dd></div>
                   <div><dt>박자</dt><dd>{beatInfo.index || '–'}/{beatInfo.beatsPerBar} · {beatInfo.bpm ?? '---'} BPM</dd></div>
@@ -683,39 +581,6 @@ export default function Home() {
                 <label className="select-control"><span>박자 패턴</span><select aria-label="박자 패턴" value={beatsPerBar} onChange={(event) => changeBeatsPerBar(Number(event.target.value))}><option value="2">2박</option><option value="3">3박</option><option value="4">4박</option></select></label>
               </TabsContent>
 
-              <TabsContent value="calibration" className="tab-body calibration-body">
-                <div className="section-title"><div><span className="eyebrow">BOARD SETUP</span><h2>카메라 · 마커 보정</h2></div><Crosshair size={17} /></div>
-                <div className="field-grid">
-                  <label><span>마커 크기</span><input type="number" min="10" max="100" value={calibrationSettings.markerSizeMm} onChange={(event) => updateCalibration({ ...calibrationSettings, markerSizeMm: Number(event.target.value) })} /><small>mm</small></label>
-                  <label><span>수평 화각</span><input type="number" min="30" max="110" value={calibrationSettings.horizontalFovDeg} onChange={(event) => updateCalibration({ ...calibrationSettings, horizontalFovDeg: Number(event.target.value) })} /><small>deg</small></label>
-                  <label><span>X 이동 범위</span><input type="number" min="40" max="500" value={calibrationSettings.xRangeMm} onChange={(event) => updateCalibration({ ...calibrationSettings, xRangeMm: Number(event.target.value) })} /><small>mm</small></label>
-                  <label><span>Y 이동 범위</span><input type="number" min="40" max="500" value={calibrationSettings.yRangeMm} onChange={(event) => updateCalibration({ ...calibrationSettings, yRangeMm: Number(event.target.value) })} /><small>mm</small></label>
-                  <label><span>깊이 범위</span><input type="number" min="80" max="800" value={calibrationSettings.depthRangeMm} onChange={(event) => updateCalibration({ ...calibrationSettings, depthRangeMm: Number(event.target.value) })} /><small>mm</small></label>
-                </div>
-                <label className="select-control"><span>사용 마커</span><select value={calibrationSettings.markers.length} onChange={(event) => {
-                  const count = Number(event.target.value);
-                  const markers = count === 2
-                    ? calibrationSettings.markers.slice(0, 2)
-                    : [...calibrationSettings.markers, DEFAULT_CALIBRATION.markers[2]].slice(0, 3);
-                  updateCalibration({ ...calibrationSettings, markers });
-                }}><option value="2">2개</option><option value="3">3개</option></select></label>
-                <div className="marker-table">
-                  <div className="marker-table-head"><span>ID</span><span>X mm</span><span>Y mm</span><span>회전 °</span></div>
-                  {calibrationSettings.markers.map((marker, index) => (
-                    <div className="marker-table-row" key={index}>
-                      <input aria-label={`마커 ${index + 1} ID`} type="number" min="0" max="1023" value={marker.id} onChange={(event) => updateMarker(index, 'id', Number(event.target.value))} />
-                      <input aria-label={`마커 ${index + 1} X 위치`} type="number" value={marker.xMm} onChange={(event) => updateMarker(index, 'xMm', Number(event.target.value))} />
-                      <input aria-label={`마커 ${index + 1} Y 위치`} type="number" value={marker.yMm} onChange={(event) => updateMarker(index, 'yMm', Number(event.target.value))} />
-                      <input aria-label={`마커 ${index + 1} 회전`} type="number" step="90" value={marker.rotationDeg} onChange={(event) => updateMarker(index, 'rotationDeg', Number(event.target.value))} />
-                    </div>
-                  ))}
-                </div>
-                <div className="button-row wrap">
-                  <Button onClick={calibrateNeutral}><Crosshair data-icon="inline-start" />영점 보정</Button>
-                  <Button variant="outline" onClick={() => printMarkerSheet(calibrationSettings)}><Printer data-icon="inline-start" />마커 출력</Button>
-                </div>
-                <p className="calibration-state">{calibrationMessage} · 기준 Z {calibrationSettings.neutralTranslationMm.z.toFixed(0)} mm</p>
-              </TabsContent>
             </Tabs>
           </aside>
 

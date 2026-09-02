@@ -28,4 +28,25 @@ describe('markerless hand pose', () => {
   it('rejects incomplete landmark sets', () => {
     expect(measureHandLandmarks(makeHand().slice(0, 10))).toBeNull();
   });
+
+  it('uses palm size as a monotonic relative depth signal', () => {
+    const farHand = makeHand();
+    farHand[0] = { x: 0.5, y: 0.65, z: 0 };
+    farHand[5] = { x: 0.46, y: 0.5, z: 0 };
+    farHand[9] = { x: 0.5, y: 0.44, z: 0 };
+    farHand[17] = { x: 0.54, y: 0.5, z: 0 };
+
+    const nearHand = farHand.map((landmark) => ({ ...landmark }));
+    nearHand[5] = { x: 0.36, y: 0.5, z: 0 };
+    nearHand[17] = { x: 0.64, y: 0.5, z: 0 };
+
+    const far = measureHandLandmarks(farHand);
+    const near = measureHandLandmarks(nearHand);
+
+    expect(far).not.toBeNull();
+    expect(near).not.toBeNull();
+    expect(near!.pose.position.z).toBeGreaterThan(far!.pose.position.z);
+    expect(near!.pose.position.z).toBeLessThanOrEqual(1);
+    expect(far!.pose.position.z).toBeGreaterThanOrEqual(0);
+  });
 });
