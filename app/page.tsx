@@ -8,6 +8,7 @@ import {
   Volume2, VolumeX, Waves,
 } from 'lucide-react';
 import { BatonStage } from '@/components/baton-stage';
+import { GestureTrainingPanel, type GestureModelStatus } from '@/components/gesture-training-panel';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
@@ -20,6 +21,18 @@ import { CameraInput, type CameraState } from '@/modules/cameraInput';
 import { DEFAULT_MAPPING, mapGesture, type MappingSettings } from '@/modules/gestureMapping';
 import { GestureCommandDetector, type ConductorCommand } from '@/modules/gestureCommands';
 import type { StaticHandGesture } from '@/modules/gestureFeatures';
+import {
+  GestureCommandModel,
+  emptyGestureSampleCounts,
+  type GestureSampleCounts,
+  type GestureTrainingProgress,
+} from '@/modules/gestureModel';
+import {
+  GESTURE_SEQUENCE_LENGTH,
+  LearnedCommandGate,
+  type GestureModelLabel,
+  type GestureModelPrediction,
+} from '@/modules/gestureModelFeatures';
 import { HandDetection, type HandDetectorState } from '@/modules/handDetection';
 import type { BatonFrame, BatonPose, MappingOutput } from '@/modules/types';
 
@@ -124,13 +137,18 @@ export default function Home() {
   const audioRef = useRef<AudioEngine | null>(null);
   const beatTrackerRef = useRef<BeatTracker | null>(null);
   const gestureCommandRef = useRef<GestureCommandDetector | null>(null);
+  const gestureModelRef = useRef<GestureCommandModel | null>(null);
+  const learnedCommandGateRef = useRef<LearnedCommandGate | null>(null);
   const modeRef = useRef<InputMode>('simulation');
   const cameraStateRef = useRef<CameraState>('off');
   const simulationPoseRef = useRef<BatonPose | null>(null);
   const cameraPoseRef = useRef<BatonPose | null>(null);
   const mappingSettingsRef = useRef<MappingSettings>(DEFAULT_MAPPING);
   const gestureCommandsEnabledRef = useRef(false);
+  const gestureModelEnabledRef = useRef(false);
   const beatSyncRef = useRef(false);
+  const trainingCaptureRef = useRef<{ label: GestureModelLabel; frames: number[][] } | null>(null);
+  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDetectionRef = useRef(0);
   const lastUiUpdateRef = useRef(0);
 
@@ -143,6 +161,14 @@ export default function Home() {
   const [gestureConfidence, setGestureConfidence] = useState(0);
   const [gestureCommandsEnabled, setGestureCommandsEnabled] = useState(false);
   const [lastCommand, setLastCommand] = useState('대기');
+  const [gestureModelStatus, setGestureModelStatus] = useState<GestureModelStatus>('loading');
+  const [gestureModelEnabled, setGestureModelEnabled] = useState(false);
+  const [gestureSampleCounts, setGestureSampleCounts] = useState<GestureSampleCounts>(emptyGestureSampleCounts);
+  const [gestureCaptureLabel, setGestureCaptureLabel] = useState<GestureModelLabel | null>(null);
+  const [gestureCaptureProgress, setGestureCaptureProgress] = useState(0);
+  const [gestureTrainingProgress, setGestureTrainingProgress] = useState<GestureTrainingProgress | null>(null);
+  const [gestureModelPrediction, setGestureModelPrediction] = useState<GestureModelPrediction | null>(null);
+  const [gestureModelMessage, setGestureModelMessage] = useState('로컬 엔진 준비 중');
   const [beatSync, setBeatSync] = useState(false);
   const [beatsPerBar, setBeatsPerBar] = useState(4);
   const [beatInfo, setBeatInfo] = useState<BeatEvent>(INITIAL_BEAT);
@@ -172,12 +198,31 @@ export default function Home() {
     const audio = new AudioEngine();
     const beatTracker = new BeatTracker();
     const gestureCommand = new GestureCommandDetector();
+    const gestureModel = new GestureCommandModel();
+    const learnedCommandGate = new LearnedCommandGate();
+    let disposed = false;
     cameraRef.current = camera;
     handDetectorRef.current = handDetector;
     controllerRef.current = controller;
     audioRef.current = audio;
     beatTrackerRef.current = beatTracker;
     gestureCommandRef.current = gestureCommand;
+    gestureModelRef.current = gestureModel;
+    learnedCommandGateRef.current = learnedCommandGate;
+    void gestureModel.getSampleCounts().then((counts) => {
+      if (!disposed) setGestureSampleCounts(counts);
+    }).catch(() => {
+      if (!disposed) setGestureModelMessage('학습 데이터 저장소 오류');
+    });
+    void gestureModel.initialize().then((hasModel) => {
+      if (disposed) return;
+      setGestureModelStatus(hasModel ? 'ready' : 'missing');
+      setGestureModelMessage(hasModel ? '저장된 모델 로드 완료' : '명령별 샘플을 수집하세요');
+    }).catch(() => {
+      if (disposed) return;
+      setGestureModelStatus('error');
+      setGestureModelMessage('TensorFlow.js 초기화 실패');
+    });
     const executeGestureCommand = (command: ConductorCommand) => {
       setLastCommand(COMMAND_LABELS[command]);
       switch (command) {
@@ -250,21 +295,66 @@ export default function Home() {
             setHandGesture(detection.gesture);
             setGestureConfidence(detection.gestureConfidence);
             setDetectionMs(detection.durationMs);
+            const activeCapture = trainingCaptureRef.current;
+            const collecting = activeCapture !== null;
+            if (activeCapture && detection.modelFeatures) {
+              activeCapture.frames.push([...detection.modelFeatures]);
+              const captured = activeCapture.frames.length;
+              setGestureCaptureProgress(captured / GESTURE_SEQUENCE_LENGTH);
+              setGestureModelMessage(`시퀀스 수집 ${captured}/${GESTURE_SEQUENCE_LENGTH}`);
+              if (captured >= GESTURE_SEQUENCE_LENGTH) {
+                const completed = { label: activeCapture.label, frames: activeCapture.frames.slice(0, GESTURE_SEQUENCE_LENGTH) };
+                trainingCaptureRef.current = null;
+                setGestureCaptureLabel(null);
+                setGestureCaptureProgress(0);
+                void gestureModel.addSample(completed.label, completed.frames).then((counts) => {
+                  if (disposed) return;
+                  setGestureSampleCounts(counts);
+                  setGestureModelMessage(`${completed.label === 'unknown' ? '기타 / 대기' : COMMAND_LABELS[completed.label]} 샘플 저장 완료`);
+                }).catch(() => {
+                  if (!disposed) setGestureModelMessage('샘플 저장 실패');
+                });
+              }
+            }
             if (detection.pose) {
               cameraPoseRef.current = detection.pose;
-              if (gestureCommandsEnabledRef.current) {
-                const command = gestureCommand.update({
-                  gesture: detection.gesture,
-                  confidence: detection.gestureConfidence,
-                  position: detection.pose.position,
-                  timestamp: now,
-                });
+              if (collecting) {
+                gestureCommand.reset();
+                learnedCommandGate.release();
+              } else if (gestureCommandsEnabledRef.current) {
+                let command: ConductorCommand | null = null;
+                if (gestureModelEnabledRef.current && gestureModel.hasModel) {
+                  gestureCommand.reset();
+                  if (detection.modelFeatures) {
+                    const prediction = gestureModel.predictFrame(detection.modelFeatures);
+                    if (prediction) {
+                      setGestureModelPrediction(prediction);
+                      command = learnedCommandGate.update(prediction, now);
+                    }
+                  } else {
+                    gestureModel.resetSequence();
+                    learnedCommandGate.release();
+                  }
+                } else {
+                  gestureModel.resetSequence();
+                  learnedCommandGate.release();
+                  command = gestureCommand.update({
+                    gesture: detection.gesture,
+                    confidence: detection.gestureConfidence,
+                    position: detection.pose.position,
+                    timestamp: now,
+                  });
+                }
                 if (command) executeGestureCommand(command);
               } else {
                 gestureCommand.reset();
+                gestureModel.resetSequence();
+                learnedCommandGate.release();
               }
             } else {
               gestureCommand.update(null);
+              gestureModel.resetSequence();
+              learnedCommandGate.release();
             }
           }
         }
@@ -298,12 +388,17 @@ export default function Home() {
     animationFrame = requestAnimationFrame(tick);
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(animationFrame);
+      if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
       camera.stop();
       handDetector.close();
+      gestureModel.dispose();
       audio.dispose();
       beatTrackerRef.current = null;
       gestureCommandRef.current = null;
+      gestureModelRef.current = null;
+      learnedCommandGateRef.current = null;
     };
   }, []);
 
@@ -324,7 +419,92 @@ export default function Home() {
     gestureCommandsEnabledRef.current = enabled;
     setGestureCommandsEnabled(enabled);
     gestureCommandRef.current?.reset();
+    learnedCommandGateRef.current?.reset();
+    gestureModelRef.current?.resetSequence();
     setLastCommand(enabled ? '명령 대기' : '안전 잠금');
+  };
+
+  const cancelGestureCapture = (message?: string) => {
+    if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+    captureTimerRef.current = null;
+    trainingCaptureRef.current = null;
+    setGestureCaptureLabel(null);
+    setGestureCaptureProgress(0);
+    if (message) setGestureModelMessage(message);
+  };
+
+  const startGestureCapture = (label: GestureModelLabel) => {
+    if (cameraStateRef.current !== 'ready' || !handDetected || gestureModelStatus === 'training') {
+      setGestureModelMessage('카메라에서 손을 먼저 인식하세요');
+      return;
+    }
+    cancelGestureCapture();
+    setGestureCaptureLabel(label);
+    let remaining = 2;
+    const countdown = () => {
+      if (remaining > 0) {
+        setGestureModelMessage(`${remaining}초 후 수집`);
+        remaining -= 1;
+        captureTimerRef.current = setTimeout(countdown, 1000);
+        return;
+      }
+      captureTimerRef.current = null;
+      trainingCaptureRef.current = { label, frames: [] };
+      setGestureModelMessage('시퀀스 수집 0/24');
+    };
+    countdown();
+  };
+
+  const changeGestureModelEnabled = (enabled: boolean) => {
+    const next = enabled && gestureModelRef.current?.hasModel === true;
+    gestureModelEnabledRef.current = next;
+    setGestureModelEnabled(next);
+    gestureCommandRef.current?.reset();
+    learnedCommandGateRef.current?.reset();
+    gestureModelRef.current?.resetSequence();
+    setGestureModelPrediction(null);
+    setGestureModelMessage(next ? '학습 모델 명령 대기' : '규칙 기반 명령 사용');
+  };
+
+  const trainGestureModel = async () => {
+    const model = gestureModelRef.current;
+    if (!model) return;
+    cancelGestureCapture();
+    changeGestureModelEnabled(false);
+    setGestureModelStatus('training');
+    setGestureTrainingProgress(null);
+    setGestureModelMessage('TCN 모델 학습 준비 중');
+    try {
+      const result = await model.train((progress) => {
+        setGestureTrainingProgress(progress);
+        setGestureModelMessage(`학습 ${progress.epoch}/${progress.epochs} · 정확도 ${Math.round(progress.accuracy * 100)}%`);
+      });
+      setGestureModelStatus('ready');
+      setGestureModelMessage(`학습 완료 · ${result.sampleCount}개 · 검증 ${Math.round(result.accuracy * 100)}%`);
+    } catch (error) {
+      setGestureModelStatus(model.hasModel ? 'ready' : 'error');
+      setGestureModelMessage(error instanceof Error ? error.message : '모델 학습 실패');
+    }
+  };
+
+  const clearGestureLearning = async () => {
+    const model = gestureModelRef.current;
+    if (!model || !window.confirm('저장된 학습 데이터와 모델을 모두 삭제할까요?')) return;
+    cancelGestureCapture();
+    changeGestureModelEnabled(false);
+    setGestureModelMessage('로컬 학습 데이터 삭제 중');
+    try {
+      await model.clearModel();
+      const counts = await model.clearSamples();
+      setGestureSampleCounts(counts);
+      setGestureTrainingProgress(null);
+      setGestureModelPrediction(null);
+      setGestureModelStatus('missing');
+      setGestureModelMessage('로컬 학습 데이터 초기화 완료');
+    } catch {
+      setGestureModelStatus('error');
+      setGestureModelMessage('로컬 학습 데이터 초기화 실패');
+    }
   };
 
   const changeBeatSync = (enabled: boolean) => {
@@ -368,6 +548,9 @@ export default function Home() {
       setHandGesture('unknown');
       setGestureConfidence(0);
       gestureCommandRef.current?.reset();
+      learnedCommandGateRef.current?.reset();
+      gestureModelRef.current?.resetSequence();
+      cancelGestureCapture('카메라가 꺼져 수집을 중단했습니다');
       cameraPoseRef.current = null;
       changeMode('simulation');
       return;
@@ -524,6 +707,7 @@ export default function Home() {
               <TabsList className="console-tabs">
                 <TabsTrigger value="input">입력</TabsTrigger>
                 <TabsTrigger value="mapping">매핑</TabsTrigger>
+                <TabsTrigger value="learning">학습</TabsTrigger>
               </TabsList>
 
               <TabsContent value="input" className="tab-body">
@@ -579,6 +763,25 @@ export default function Home() {
                 <RangeControl label="오디오 램프" value={mappingSettings.rampSeconds} min={0.02} max={0.3} step={0.01} unit="s" onChange={(value) => updateMapping('rampSeconds', value)} />
                 <label className="select-control"><span>급정지 동작</span><select value={mappingSettings.suddenStopAction} onChange={(event) => updateMapping('suddenStopAction', event.target.value as MappingSettings['suddenStopAction'])}><option value="off">사용 안 함</option><option value="duck">짧게 감쇠</option><option value="pause">일시정지</option></select></label>
                 <label className="select-control"><span>박자 패턴</span><select aria-label="박자 패턴" value={beatsPerBar} onChange={(event) => changeBeatsPerBar(Number(event.target.value))}><option value="2">2박</option><option value="3">3박</option><option value="4">4박</option></select></label>
+              </TabsContent>
+
+              <TabsContent value="learning" className="tab-body">
+                <GestureTrainingPanel
+                  status={gestureModelStatus}
+                  enabled={gestureModelEnabled}
+                  counts={gestureSampleCounts}
+                  captureLabel={gestureCaptureLabel}
+                  captureProgress={gestureCaptureProgress}
+                  trainingProgress={gestureTrainingProgress}
+                  prediction={gestureModelPrediction}
+                  message={gestureModelMessage}
+                  cameraReady={cameraState === 'ready'}
+                  handDetected={handDetected}
+                  onEnabledChange={changeGestureModelEnabled}
+                  onCapture={startGestureCapture}
+                  onTrain={() => void trainGestureModel()}
+                  onClear={() => void clearGestureLearning()}
+                />
               </TabsContent>
 
             </Tabs>

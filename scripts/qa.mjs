@@ -113,6 +113,26 @@ try {
     throw new Error(`Conducting beat was not detected: ${beatReadout}`);
   }
 
+  await page.getByRole('tab', { name: '학습' }).click();
+  await page.waitForFunction(
+    () => {
+      const status = document.querySelector('.model-status-list dd')?.textContent ?? '';
+      return status && !status.includes('준비 중');
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  const gestureModelState = await page.locator('.model-status-list dd').first().textContent();
+  if (!gestureModelState?.includes('모델 없음') && !gestureModelState?.includes('모델 준비됨')) {
+    throw new Error(`Gesture model failed to initialize: ${gestureModelState}`);
+  }
+  const sampleButtons = page.locator('.gesture-sample-grid button');
+  const sampleButtonCount = await sampleButtons.count();
+  if (sampleButtonCount !== 9) throw new Error(`Gesture training labels are incomplete: ${sampleButtonCount}`);
+  if (!await sampleButtons.first().isDisabled()) throw new Error('Gesture capture should require a detected camera hand');
+  await page.screenshot({ path: `${resultsDir}/learning.png`, fullPage: true });
+  await page.getByRole('tab', { name: '입력' }).click();
+
   const commandSwitch = page.getByRole('switch', { name: '손 명령 사용' });
   await commandSwitch.click();
   if (!await commandSwitch.isChecked()) throw new Error('Hand command safety switch did not enable');
@@ -203,7 +223,7 @@ try {
   if (runtimeErrors.length || responseErrors.length) {
     throw new Error(`Runtime errors: ${[...runtimeErrors, ...responseErrors].join(' | ')}`);
   }
-  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, beatReadout, threeBeatReadout, waveform, baseTone, audibleMeter, crescendoLevel, decrescendoLevel, muteState, mutedMeter, tempo, balance, cameraState, handModelState, mediaPipeAssets, runtimeErrors, responseErrors }, null, 2));
+  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, beatReadout, threeBeatReadout, gestureModelState, sampleButtonCount, waveform, baseTone, audibleMeter, crescendoLevel, decrescendoLevel, muteState, mutedMeter, tempo, balance, cameraState, handModelState, mediaPipeAssets, runtimeErrors, responseErrors }, null, 2));
 } finally {
   await browser.close();
 }

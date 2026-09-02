@@ -128,6 +128,26 @@ button:disabled { cursor: not-allowed; }
 .orientation-grid span { margin-bottom: 6px; color: #70838d; font: 700 8px var(--font-mono); }
 .orientation-grid b { overflow: hidden; font: 500 13px var(--font-mono); text-overflow: ellipsis; }
 
+.gesture-training-body { display: flex; flex-direction: column; gap: 12px; }
+.model-enable-row { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 9px; border: 1px solid #2a3840; background: #0e1519; border-radius: 4px; }
+.model-enable-row span, .model-enable-row b, .model-enable-row small { display: block; }
+.model-enable-row b { color: #b9c6cc; font-size: 10px; font-weight: 650; }
+.model-enable-row small { margin-top: 4px; color: #687b84; font: 500 8px var(--font-mono); }
+.model-status-list { margin: 0; }
+.training-progress > span { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.training-progress > span b { min-width: 0; overflow: hidden; color: #aebcc3; font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.training-progress > span small { color: #6cc9ff; font: 700 8px var(--font-mono); }
+.training-progress > i { height: 5px; display: block; overflow: hidden; background: #25333a; border-radius: 2px; }
+.training-progress > i > b { height: 100%; display: block; background: #6cc9ff; border-radius: inherit; transition: width 120ms linear; }
+.gesture-sample-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.gesture-sample-grid button { min-width: 0; height: 42px; display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid #30414a; color: #aebdc4; background: #121b20; border-radius: 4px; text-align: left; }
+.gesture-sample-grid button span { overflow: hidden; font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.gesture-sample-grid button b { color: #6cc9ff; font: 700 8px var(--font-mono); text-align: right; }
+.gesture-sample-grid button.active { border-color: #e7563b; color: #fff; background: #401b18; }
+.gesture-sample-grid button:disabled { opacity: 0.42; }
+.model-actions { padding-top: 2px; }
+.local-data-note { display: flex; align-items: center; gap: 6px; color: #657983; font: 600 8px var(--font-mono); }
+
 .range-stack { display: flex; flex-direction: column; gap: 17px; }
 .range-control { display: block; }
 .range-control > span { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }

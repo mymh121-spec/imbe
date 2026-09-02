@@ -4,7 +4,7 @@
 
 ## 현재 구현 상태
 
-규칙 기반 1차 구현이 완료되었습니다. `gestureFeatures`가 주먹·손바닥·엄지·핀치를 판정하고, `gestureCommands`가 유지 시간과 쿨다운을 적용하며, `beatTracker`가 지휘 궤적에서 2·3·4박 카운트와 BPM을 계산합니다. 손 명령과 박자 동기화는 각각 안전 스위치를 켰을 때만 오디오에 반영됩니다. 현재는 딥러닝 모델을 사용하지 않으며, 실제 오인식 데이터가 쌓인 뒤 도입 여부를 결정합니다.
+규칙 기반 판정과 개인화 TCN 명령 모델이 구현되었습니다. `gestureFeatures`와 `gestureCommands`가 규칙 기반 폴백을 담당하고, `gestureModelFeatures`가 24프레임 랜드마크 시퀀스를 만들며, `gestureModel`이 TensorFlow.js 학습·추론과 IndexedDB 저장을 처리합니다. `beatTracker`의 2·3·4박 카운트와 BPM은 설명 가능성과 안정성을 위해 규칙 기반으로 유지합니다. 학습 모델과 손 명령은 각각 안전 스위치를 켰을 때만 오디오에 반영됩니다.
 
 ## 1. 지휘 동작과 기능 매핑
 
@@ -107,13 +107,13 @@ gestureMapping + AudioEngine
 
 원본 앱의 “Python·NumPy 없이 브라우저 실행” 조건을 지키려면 TensorFlow.js를 로컬 번들로 추가하고, 별도 학습 화면에서 다음 순서로 처리할 수 있습니다.
 
-1. `MediaPipe` 랜드마크를 30~60프레임씩 수집합니다.
-2. 사용자가 `beat`, `fist`, `open_palm`, `thumb_up`, `thumb_down`, `crescendo`, `decrescendo`, `unknown` 라벨을 누릅니다.
+1. `MediaPipe` 랜드마크를 현재 구현 기준 24프레임씩 수집합니다.
+2. 사용자가 `mute`, `unmute`, `tempo-up`, `tempo-down`, `crescendo`, `decrescendo`, `balance-left`, `balance-right`, `unknown` 라벨을 누릅니다.
 3. 좌표를 손목 기준으로 이동시키고 손바닥 크기로 나눠 사용자별 크기 차이를 제거합니다.
-4. 좌우 반전, 작은 회전, 속도 변화, 랜드마크 노이즈를 데이터 증강합니다.
-5. 브라우저에서 작은 MLP/TCN 모델을 학습하고 검증 정확도와 혼동행렬을 표시합니다.
-6. 모델을 IndexedDB와 다운로드 가능한 로컬 파일로 저장합니다.
-7. 앱 시작 시 모델을 로컬에서 불러와 추론하고, 모델이 없으면 현재 규칙 기반 로직으로 폴백합니다.
+4. 현재는 브라우저에서 2개 Conv1D 층과 Global Average Pooling으로 구성된 경량 TCN을 35 epoch 학습합니다.
+5. 모델과 랜드마크 데이터는 IndexedDB에 저장합니다.
+6. 앱 시작 시 모델을 로컬에서 불러와 추론하고, 모델이 없으면 현재 규칙 기반 로직으로 폴백합니다.
+7. 데이터 증강, 혼동행렬과 모델 파일 내보내기는 실제 사용자 데이터가 충분해질 때 추가합니다.
 
 브라우저 학습은 가능하지만 노트북 성능과 데이터 양에 따라 시간이 걸립니다. 운영 시에는 학습을 매번 하지 않고, 한 번 만든 모델을 추론에만 사용하는 것이 좋습니다.
 
@@ -142,7 +142,8 @@ gestureMapping + AudioEngine
 - `modules/beatTracker.ts`: 속도 피크, 다운비트, BPM과 박자 phase
 - `modules/gestureFeatures.ts`: 랜드마크 정규화와 손가락 특징
 - `modules/gestureCommands.ts`: 유지 시간·쿨다운·unknown 처리
-- `modules/gestureModel.ts`: 로컬 TensorFlow.js/ONNX 추론과 폴백
+- `modules/gestureModelFeatures.ts`: 66개 특징 정규화, 24프레임 버퍼와 명령 안전 게이트
+- `modules/gestureModel.ts`: 로컬 TensorFlow.js TCN 학습·추론, IndexedDB 저장과 폴백
 - `modules/conductorState.ts`: 연속값·박자·명령 이벤트 통합
 - `tests/beatTracker.test.ts`: 합성 궤적의 BPM·박자 카운트 검증
 - `tests/gestureCommands.test.ts`: 주먹 유지, 쿨다운, 저신뢰도 검증
@@ -161,4 +162,4 @@ gestureMapping + AudioEngine
 
 ## 결론
 
-손 동작만으로 박자, 크레센도·디크레센도, 음소거, 템포, 좌우 가중치를 모두 실행하는 것은 기술적으로 가능합니다. 현재 앱은 MediaPipe 랜드마크와 규칙 기반 박자·명령 판정만 사용합니다. 실제 데이터에서 규칙 기반 정확도가 부족할 때만 작은 분류 모델을 추가하고, 결과는 동일한 상태 머신과 신뢰도·쿨다운을 거쳐 `AudioEngine`에 전달하는 방식이 적절합니다.
+손 동작만으로 박자, 크레센도·디크레센도, 음소거, 템포, 좌우 가중치를 모두 실행할 수 있습니다. 현재 앱은 MediaPipe 랜드마크 기반 TCN 명령 분류기와 규칙 기반 폴백을 제공하며, 모든 모델 결과는 90% 신뢰도, 220ms 유지와 850ms 쿨다운을 거쳐 `AudioEngine`에 전달됩니다. 박자와 연속 오디오 값은 모델에서 분리해 기존 계산식을 유지합니다.

@@ -2,6 +2,7 @@ import type { HandLandmarker, HandLandmarkerResult, NormalizedLandmark } from '@
 import { Euler, Quaternion } from 'three';
 import { CameraBatonRenderer } from './cameraBatonOverlay';
 import { extractGestureFeatures, type StaticHandGesture } from './gestureFeatures';
+import { encodeGestureModelFrame } from './gestureModelFeatures';
 import type { BatonPose } from './types';
 
 export type HandDetectorState = 'idle' | 'loading' | 'ready' | 'error';
@@ -12,6 +13,7 @@ export type HandDetectionFrame = {
   handedness: string | null;
   gesture: StaticHandGesture;
   gestureConfidence: number;
+  modelFeatures: number[] | null;
   durationMs: number;
 };
 
@@ -111,15 +113,18 @@ export class HandDetection {
 
     const landmarks = result?.landmarks[0] ?? null;
     const confidence = result?.handedness[0]?.[0]?.score ?? 0;
+    const handedness = result?.handedness[0]?.[0]?.categoryName ?? null;
     const measurement = landmarks ? measureHandLandmarks(landmarks, timestamp, confidence) : null;
     const gestureFeatures = landmarks ? extractGestureFeatures(landmarks) : null;
+    const modelFeatures = landmarks ? encodeGestureModelFrame(landmarks, handedness) : null;
     if (preview) this.drawPreview(video, preview, landmarks, measurement);
     return {
       pose: measurement?.pose ?? null,
       handCount: result?.landmarks.length ?? 0,
-      handedness: result?.handedness[0]?.[0]?.categoryName ?? null,
+      handedness,
       gesture: gestureFeatures?.gesture ?? 'unknown',
       gestureConfidence: gestureFeatures ? gestureFeatures.confidence * confidence : 0,
+      modelFeatures,
       durationMs: performance.now() - startedAt,
     };
   }
