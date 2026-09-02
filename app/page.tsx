@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, AudioLines, Camera, CameraOff, Crosshair, Eye, EyeOff, FileAudio,
-  Hand, MousePointer2, Pause, Play, Printer, Radio, Repeat2, ScanLine, Square,
-  TestTube2, Triangle, Upload, Waves,
+  Gauge, Hand, Move3d, MoveHorizontal, MoveVertical, MousePointer2, Pause, Play,
+  Printer, Radio, Repeat2, Rotate3d, ScanLine, Square, TestTube2, Triangle,
+  Upload, Waves, Zap,
 } from 'lucide-react';
 import { BatonStage } from '@/components/baton-stage';
 import { Button } from '@/components/ui/button';
@@ -127,9 +128,9 @@ export default function Home() {
   const [waveform, setWaveform] = useState<SynthWaveform>('sine');
   const [loop, setLoop] = useState(true);
   const [trackInfo, setTrackInfo] = useState([
-    { name: 'Pulse 110', level: 0.34, hasFile: false },
-    { name: 'Body 220', level: 0.24, hasFile: false },
-    { name: 'Air 330', level: 0.16, hasFile: false },
+    { name: 'A4 Base 440', level: 0.34, hasFile: false },
+    { name: '2nd Harmonic 880', level: 0.24, hasFile: false },
+    { name: '3rd Harmonic 1320', level: 0.16, hasFile: false },
   ]);
   const [audioMeter, setAudioMeter] = useState(0);
 
@@ -508,13 +509,26 @@ export default function Home() {
                 <IconAction label="정지" onClick={handleStop} disabled={playback === 'stopped'}><Square /></IconAction>
                 <div className="loop-control"><Repeat2 /><span>반복</span><Switch aria-label="반복 재생" checked={loop} onCheckedChange={(checked) => { setLoop(checked); audioRef.current?.setLoop(checked); }} /></div>
               </div>
-              <div className="waveform-control">
-                <span className="waveform-label">TEST WAVE</span>
-                <div className="waveform-buttons" aria-label="테스트 합성음 파형">
-                  <button className={waveform === 'sine' ? 'active' : ''} onClick={() => void selectWaveform('sine')}><Waves />사인파</button>
-                  <button className={waveform === 'triangle' ? 'active' : ''} onClick={() => void selectWaveform('triangle')}><Triangle />삼각파</button>
-                  <button className={waveform === 'square' ? 'active' : ''} onClick={() => void selectWaveform('square')}><Square />사각파</button>
+              <div className="waveform-tutorial-layout">
+                <div className="waveform-control">
+                  <span className="waveform-label">BASE TONE <b>A4 · 440 Hz</b></span>
+                  <div className="waveform-buttons" aria-label="테스트 합성음 파형">
+                    <button className={waveform === 'sine' ? 'active' : ''} onClick={() => void selectWaveform('sine')}><Waves />사인파</button>
+                    <button className={waveform === 'triangle' ? 'active' : ''} onClick={() => void selectWaveform('triangle')}><Triangle />삼각파</button>
+                    <button className={waveform === 'square' ? 'active' : ''} onClick={() => void selectWaveform('square')}><Square />사각파</button>
+                  </div>
                 </div>
+                <aside className="motion-tutorial" aria-label="지휘 동작 튜토리얼">
+                  <span className="waveform-label">MOTION TUTORIAL</span>
+                  <ul>
+                    <li><MoveHorizontal /><b>좌우</b><span>패닝</span></li>
+                    <li><MoveVertical /><b>상하</b><span>저음·고음 EQ</span></li>
+                    <li><Move3d /><b>거리</b><span>전체 음량</span></li>
+                    <li><Rotate3d /><b>기울기</b><span>EQ 강도</span></li>
+                    <li><Gauge /><b>빠른 이동</b><span>반응 강도</span></li>
+                    <li><Zap /><b>급정지</b><span>감쇠·일시정지</span></li>
+                  </ul>
+                </aside>
               </div>
               <Meter value={audioMeter} tone="coral" />
               <div className="button-row wrap">

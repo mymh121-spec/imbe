@@ -147,6 +147,10 @@ try {
   await page.waitForTimeout(180);
   const waveform = await page.locator('.waveform-buttons button.active').textContent();
   if (!waveform?.includes('사각파')) throw new Error(`Waveform selection did not activate: ${waveform}`);
+  const baseTone = await page.locator('.track-header b').first().textContent();
+  if (!baseTone?.includes('440')) throw new Error(`Base synth tone is not 440 Hz: ${baseTone}`);
+  const tutorialSteps = await page.locator('.motion-tutorial li').count();
+  if (tutorialSteps !== 6) throw new Error(`Motion tutorial is incomplete: ${tutorialSteps} steps`);
 
   await page.getByRole('button', { name: '카메라 켜기' }).click();
   await page.waitForTimeout(800);
@@ -189,7 +193,7 @@ try {
   if (runtimeErrors.length || responseErrors.length) {
     throw new Error(`Runtime errors: ${[...runtimeErrors, ...responseErrors].join(' | ')}`);
   }
-  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, waveform, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
+  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, waveform, baseTone, tutorialSteps, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
 } finally {
   await browser.close();
 }

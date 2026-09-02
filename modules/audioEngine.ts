@@ -15,8 +15,8 @@ type TrackChain = {
   level: number;
 };
 
-const SYNTH_FREQUENCIES = [110, 220, 329.63];
-const SYNTH_NAMES = ['Pulse 110', 'Body 220', 'Air 330'];
+const SYNTH_FREQUENCIES = [440, 880, 1320];
+const SYNTH_NAMES = ['A4 Base 440', '2nd Harmonic 880', '3rd Harmonic 1320'];
 
 export class AudioEngine {
   private context: AudioContext | null = null;
