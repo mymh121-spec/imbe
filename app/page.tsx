@@ -15,11 +15,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AudioEngine, type AudioPlaybackState, type SynthWaveform } from '@/modules/audioEngine';
 import { BatonController } from '@/modules/batonController';
+import { BeatTracker, type BeatEvent } from '@/modules/beatTracker';
 import { CameraInput, type CameraState } from '@/modules/cameraInput';
 import {
   CalibrationManager, DEFAULT_CALIBRATION, printMarkerSheet, type CalibrationSettings,
 } from '@/modules/calibration';
 import { DEFAULT_MAPPING, mapGesture, type MappingSettings } from '@/modules/gestureMapping';
+import { GestureCommandDetector, type ConductorCommand } from '@/modules/gestureCommands';
+import type { StaticHandGesture } from '@/modules/gestureFeatures';
 import { HandDetection, type HandDetectorState } from '@/modules/handDetection';
 import { MarkerDetection } from '@/modules/markerDetection';
 import { estimateBoardPose } from '@/modules/poseEstimation';
@@ -57,6 +60,34 @@ const HAND_STATE_LABELS: Record<HandDetectorState, string> = {
   loading: '손 모델 준비 중',
   ready: '손 미검출',
   error: '손 모델 오류',
+};
+
+const GESTURE_LABELS: Record<StaticHandGesture, string> = {
+  fist: '주먹',
+  'open-palm': '손바닥',
+  'thumb-up': '엄지 위',
+  'thumb-down': '엄지 아래',
+  pinch: '핀치',
+  unknown: '대기',
+};
+
+const COMMAND_LABELS: Record<ConductorCommand, string> = {
+  mute: '음소거',
+  unmute: '음소거 해제',
+  'tempo-up': '템포 +10',
+  'tempo-down': '템포 -10',
+  crescendo: '크레센도',
+  decrescendo: '디크레센도',
+  'balance-left': '밸런스 왼쪽',
+  'balance-right': '밸런스 오른쪽',
+};
+
+const INITIAL_BEAT: BeatEvent = {
+  index: 0,
+  beatsPerBar: 4,
+  bpm: null,
+  confidence: 0,
+  timestamp: 0,
 };
 
 function numberText(value: number, digits = 2) {
@@ -99,6 +130,8 @@ export default function Home() {
   const calibrationRef = useRef<CalibrationManager | null>(null);
   const controllerRef = useRef<BatonController | null>(null);
   const audioRef = useRef<AudioEngine | null>(null);
+  const beatTrackerRef = useRef<BeatTracker | null>(null);
+  const gestureCommandRef = useRef<GestureCommandDetector | null>(null);
   const modeRef = useRef<InputMode>('simulation');
   const trackingModeRef = useRef<CameraTrackingMode>('hand');
   const cameraStateRef = useRef<CameraState>('off');
@@ -107,6 +140,8 @@ export default function Home() {
   const lastBoardPoseRef = useRef<BoardPose | null>(null);
   const calibrationSettingsRef = useRef<CalibrationSettings>(DEFAULT_CALIBRATION);
   const mappingSettingsRef = useRef<MappingSettings>(DEFAULT_MAPPING);
+  const gestureCommandsEnabledRef = useRef(false);
+  const beatSyncRef = useRef(false);
   const lastDetectionRef = useRef(0);
   const lastUiUpdateRef = useRef(0);
 
@@ -117,6 +152,13 @@ export default function Home() {
   const [handState, setHandState] = useState<HandDetectorState>('idle');
   const [handDetected, setHandDetected] = useState(false);
   const [handedness, setHandedness] = useState<string | null>(null);
+  const [handGesture, setHandGesture] = useState<StaticHandGesture>('unknown');
+  const [gestureConfidence, setGestureConfidence] = useState(0);
+  const [gestureCommandsEnabled, setGestureCommandsEnabled] = useState(false);
+  const [lastCommand, setLastCommand] = useState('대기');
+  const [beatSync, setBeatSync] = useState(false);
+  const [beatsPerBar, setBeatsPerBar] = useState(4);
+  const [beatInfo, setBeatInfo] = useState<BeatEvent>(INITIAL_BEAT);
   const [detectionMs, setDetectionMs] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(true);
   const [frame, setFrame] = useState<BatonFrame>(INITIAL_FRAME);
@@ -145,12 +187,71 @@ export default function Home() {
     const calibration = new CalibrationManager();
     const controller = new BatonController();
     const audio = new AudioEngine();
+    const beatTracker = new BeatTracker();
+    const gestureCommand = new GestureCommandDetector();
     cameraRef.current = camera;
     detectorRef.current = detector;
     handDetectorRef.current = handDetector;
     calibrationRef.current = calibration;
     controllerRef.current = controller;
     audioRef.current = audio;
+    beatTrackerRef.current = beatTracker;
+    gestureCommandRef.current = gestureCommand;
+    const executeGestureCommand = (command: ConductorCommand) => {
+      setLastCommand(COMMAND_LABELS[command]);
+      switch (command) {
+        case 'mute':
+          audio.setMuted(true);
+          setMuted(true);
+          break;
+        case 'unmute':
+          audio.setMuted(false);
+          setMuted(false);
+          break;
+        case 'tempo-up':
+          setTempoBpm((current) => {
+            const next = Math.min(180, current + 10);
+            audio.setTempoBpm(next);
+            return next;
+          });
+          break;
+        case 'tempo-down':
+          setTempoBpm((current) => {
+            const next = Math.max(60, current - 10);
+            audio.setTempoBpm(next);
+            return next;
+          });
+          break;
+        case 'crescendo':
+          setDynamicsLevel((current) => {
+            const next = Math.min(1, Number((current + 0.1).toFixed(1)));
+            audio.setDynamicsLevel(next);
+            return next;
+          });
+          break;
+        case 'decrescendo':
+          setDynamicsLevel((current) => {
+            const next = Math.max(0, Number((current - 0.1).toFixed(1)));
+            audio.setDynamicsLevel(next);
+            return next;
+          });
+          break;
+        case 'balance-left':
+          setManualPan((current) => {
+            const next = Math.max(-1, Number((current - 0.2).toFixed(1)));
+            audio.setManualPan(next);
+            return next;
+          });
+          break;
+        case 'balance-right':
+          setManualPan((current) => {
+            const next = Math.min(1, Number((current + 0.2).toFixed(1)));
+            audio.setManualPan(next);
+            return next;
+          });
+          break;
+      }
+    };
     const savedCalibration = calibration.getSettings();
     calibrationSettingsRef.current = savedCalibration;
     queueMicrotask(() => setCalibrationSettings(savedCalibration));
@@ -170,9 +271,26 @@ export default function Home() {
           if (detection) {
             setHandDetected(detection.handCount > 0);
             setHandedness(detection.handedness);
+            setHandGesture(detection.gesture);
+            setGestureConfidence(detection.gestureConfidence);
             setMarkerIds([]);
             setDetectionMs(detection.durationMs);
-            if (detection.pose) cameraPoseRef.current = detection.pose;
+            if (detection.pose) {
+              cameraPoseRef.current = detection.pose;
+              if (gestureCommandsEnabledRef.current) {
+                const command = gestureCommand.update({
+                  gesture: detection.gesture,
+                  confidence: detection.gestureConfidence,
+                  position: detection.pose.position,
+                  timestamp: now,
+                });
+                if (command) executeGestureCommand(command);
+              } else {
+                gestureCommand.reset();
+              }
+            } else {
+              gestureCommand.update(null);
+            }
           }
         } else if (detectorRef.current) {
           const detection = detectorRef.current.detect(videoRef.current, previewRef.current ?? undefined);
@@ -181,6 +299,9 @@ export default function Home() {
             const relevant = detection.markers.filter((marker) => configured.markers.some((item) => item.id === marker.id));
             setMarkerIds(relevant.map((marker) => marker.id));
             setHandDetected(false);
+            setHandGesture('unknown');
+            setGestureConfidence(0);
+            gestureCommand.reset();
             setDetectionMs(detection.durationMs);
             const intrinsics = calibration.getIntrinsics(detection.width, detection.height);
             const boardPose = estimateBoardPose(relevant, configured.markers, configured.markerSizeMm, intrinsics, now);
@@ -198,6 +319,14 @@ export default function Home() {
         : cameraPose && now - cameraPose.timestamp < 420 ? cameraPose : null;
       const nextFrame = controller.update(measurement, now);
       const nextMapping = mapGesture(nextFrame, mappingSettingsRef.current);
+      const beat = beatTracker.update(nextFrame.tracking === 'idle' ? null : nextFrame);
+      if (beat) {
+        setBeatInfo(beat);
+        if (beatSyncRef.current && beat.bpm && beat.confidence >= 0.45) {
+          audio.setTempoBpm(beat.bpm);
+          setTempoBpm(beat.bpm);
+        }
+      }
       audio.applyMapping(nextMapping, mappingSettingsRef.current.rampSeconds);
       if (nextFrame.suddenStop) audio.handleSuddenStop(mappingSettingsRef.current.suddenStopAction);
 
@@ -216,6 +345,8 @@ export default function Home() {
       camera.stop();
       handDetector.close();
       audio.dispose();
+      beatTrackerRef.current = null;
+      gestureCommandRef.current = null;
     };
   }, []);
 
@@ -230,6 +361,25 @@ export default function Home() {
   const changeMode = (next: InputMode) => {
     setMode(next);
     modeRef.current = next;
+  };
+
+  const changeGestureCommandsEnabled = (enabled: boolean) => {
+    gestureCommandsEnabledRef.current = enabled;
+    setGestureCommandsEnabled(enabled);
+    gestureCommandRef.current?.reset();
+    setLastCommand(enabled ? '명령 대기' : '안전 잠금');
+  };
+
+  const changeBeatSync = (enabled: boolean) => {
+    beatSyncRef.current = enabled;
+    setBeatSync(enabled);
+  };
+
+  const changeBeatsPerBar = (value: number) => {
+    const next = Math.min(4, Math.max(2, Math.round(value)));
+    beatTrackerRef.current?.setBeatsPerBar(next);
+    setBeatsPerBar(next);
+    setBeatInfo({ ...INITIAL_BEAT, beatsPerBar: next });
   };
 
   const prepareHandDetector = useCallback(async () => {
@@ -251,9 +401,17 @@ export default function Home() {
   const changeTrackingMode = (next: CameraTrackingMode) => {
     trackingModeRef.current = next;
     setTrackingMode(next);
+    if (next === 'marker') {
+      gestureCommandsEnabledRef.current = false;
+      setGestureCommandsEnabled(false);
+      setLastCommand('안전 잠금');
+    }
     setMarkerIds([]);
     setHandDetected(false);
     setHandedness(null);
+    setHandGesture('unknown');
+    setGestureConfidence(0);
+    gestureCommandRef.current?.reset();
     setDetectionMs(0);
     cameraPoseRef.current = null;
     if (cameraStateRef.current === 'ready') {
@@ -273,6 +431,9 @@ export default function Home() {
       setMarkerIds([]);
       setHandDetected(false);
       setHandedness(null);
+      setHandGesture('unknown');
+      setGestureConfidence(0);
+      gestureCommandRef.current?.reset();
       cameraPoseRef.current = null;
       changeMode('simulation');
       return;
@@ -435,7 +596,10 @@ export default function Home() {
               <div><span className="eyebrow">3D BATON</span><h2>지휘 공간</h2></div>
               <div className="stage-statuses">
                 <span className="signal-badge"><Activity size={13} /> {frame.tracking.toUpperCase()}</span>
-                <span className="signal-badge">CONF {Math.round(frame.confidence * 100)}%</span>
+                <span className="signal-badge beat-badge" key={beatInfo.timestamp}>
+                  BEAT {beatInfo.index || '–'}/{beatInfo.beatsPerBar} · {beatInfo.bpm ?? '---'} BPM
+                </span>
+                <span className="signal-badge confidence-badge">CONF {Math.round(frame.confidence * 100)}%</span>
               </div>
             </div>
             <BatonStage frame={frame} simulationEnabled={mode === 'simulation'} onSimulationPose={handleSimulationPose} />
@@ -466,6 +630,16 @@ export default function Home() {
                   <button className={trackingMode === 'hand' ? 'active' : ''} aria-pressed={trackingMode === 'hand'} onClick={() => changeTrackingMode('hand')}><Hand />손 추적</button>
                   <button className={trackingMode === 'marker' ? 'active' : ''} aria-pressed={trackingMode === 'marker'} onClick={() => changeTrackingMode('marker')}><ScanLine />마커 추적</button>
                 </div>
+                <div className="conductor-options">
+                  <div>
+                    <span><b>손 명령</b><small>유지·핀치 동작 실행</small></span>
+                    <Switch aria-label="손 명령 사용" checked={gestureCommandsEnabled} disabled={trackingMode !== 'hand'} onCheckedChange={changeGestureCommandsEnabled} />
+                  </div>
+                  <div>
+                    <span><b>박자 동기화</b><small>검출 BPM을 오디오에 적용</small></span>
+                    <Switch aria-label="박자 동기화" checked={beatSync} onCheckedChange={changeBeatSync} />
+                  </div>
+                </div>
                 <div className={`camera-preview ${previewVisible ? '' : 'is-hidden'}`}>
                   {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- Muted camera frames contain no audio. */}
                   <video ref={videoRef} muted playsInline aria-hidden="true" />
@@ -485,6 +659,9 @@ export default function Home() {
                 <dl className="status-list">
                   <div><dt>장치</dt><dd className={cameraState === 'ready' ? 'text-ok' : ''}>{CAMERA_LABELS[cameraState]}</dd></div>
                   <div><dt>{trackingMode === 'hand' ? '손 추적' : '마커 ID'}</dt><dd>{trackingMode === 'hand' ? handTrackingLabel : markerIds.length ? markerIds.join(', ') : '없음'}</dd></div>
+                  <div><dt>손 모양</dt><dd>{GESTURE_LABELS[handGesture]} {gestureConfidence ? `${Math.round(gestureConfidence * 100)}%` : ''}</dd></div>
+                  <div><dt>최근 명령</dt><dd>{lastCommand}</dd></div>
+                  <div><dt>박자</dt><dd>{beatInfo.index || '–'}/{beatInfo.beatsPerBar} · {beatInfo.bpm ?? '---'} BPM</dd></div>
                   <div><dt>검출 시간</dt><dd>{detectionMs ? `${detectionMs.toFixed(1)} ms` : '—'}</dd></div>
                 </dl>
                 <div className="orientation-grid">
@@ -503,6 +680,7 @@ export default function Home() {
                 <RangeControl label="입력 평활화" value={mappingSettings.smoothingHz} min={1} max={12} step={0.5} unit="Hz" onChange={(value) => updateMapping('smoothingHz', value)} />
                 <RangeControl label="오디오 램프" value={mappingSettings.rampSeconds} min={0.02} max={0.3} step={0.01} unit="s" onChange={(value) => updateMapping('rampSeconds', value)} />
                 <label className="select-control"><span>급정지 동작</span><select value={mappingSettings.suddenStopAction} onChange={(event) => updateMapping('suddenStopAction', event.target.value as MappingSettings['suddenStopAction'])}><option value="off">사용 안 함</option><option value="duck">짧게 감쇠</option><option value="pause">일시정지</option></select></label>
+                <label className="select-control"><span>박자 패턴</span><select aria-label="박자 패턴" value={beatsPerBar} onChange={(event) => changeBeatsPerBar(Number(event.target.value))}><option value="2">2박</option><option value="3">3박</option><option value="4">4박</option></select></label>
               </TabsContent>
 
               <TabsContent value="calibration" className="tab-body calibration-body">

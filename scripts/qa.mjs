@@ -140,6 +140,38 @@ try {
   const xReadout = await page.locator('.metric-cell strong').first().textContent();
   if (!xReadout || Math.abs(Number(xReadout)) < 0.1) throw new Error(`Simulation X did not move: ${xReadout}`);
 
+  await page.mouse.move(stage.x + stage.width * 0.5, stage.y + stage.height * 0.25);
+  await page.mouse.down();
+  for (let beat = 0; beat < 4; beat += 1) {
+    await page.mouse.move(stage.x + stage.width * 0.5, stage.y + stage.height * 0.25);
+    await page.waitForTimeout(80);
+    await page.mouse.move(stage.x + stage.width * 0.5, stage.y + stage.height * 0.5);
+    await page.waitForTimeout(80);
+    await page.mouse.move(stage.x + stage.width * 0.5, stage.y + stage.height * 0.76);
+    await page.waitForTimeout(100);
+    await page.mouse.move(stage.x + stage.width * 0.5, stage.y + stage.height * 0.5);
+    await page.waitForTimeout(80);
+    await page.mouse.move(stage.x + stage.width * 0.5, stage.y + stage.height * 0.25);
+    await page.waitForTimeout(120);
+  }
+  await page.mouse.up();
+  const beatReadout = await page.locator('.beat-badge').textContent();
+  if (!beatReadout || beatReadout.includes('BEAT –') || beatReadout.includes('--- BPM')) {
+    throw new Error(`Conducting beat was not detected: ${beatReadout}`);
+  }
+
+  const commandSwitch = page.getByRole('switch', { name: '손 명령 사용' });
+  await commandSwitch.click();
+  if (!await commandSwitch.isChecked()) throw new Error('Hand command safety switch did not enable');
+  const beatSyncSwitch = page.getByRole('switch', { name: '박자 동기화' });
+  await beatSyncSwitch.click();
+  if (!await beatSyncSwitch.isChecked()) throw new Error('Beat sync switch did not enable');
+  await page.getByRole('tab', { name: '매핑' }).click();
+  await page.getByLabel('박자 패턴').selectOption('3');
+  const threeBeatReadout = await page.locator('.beat-badge').textContent();
+  if (!threeBeatReadout?.includes('/3')) throw new Error(`Three-beat pattern did not activate: ${threeBeatReadout}`);
+  await page.getByRole('tab', { name: '입력' }).click();
+
   await page.getByRole('button', { name: '재생' }).click();
   await page.waitForTimeout(250);
   if (await page.getByRole('button', { name: '일시정지' }).isDisabled()) throw new Error('Audio playback did not enter playing state');
@@ -224,7 +256,7 @@ try {
   if (runtimeErrors.length || responseErrors.length) {
     throw new Error(`Runtime errors: ${[...runtimeErrors, ...responseErrors].join(' | ')}`);
   }
-  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, waveform, baseTone, audibleMeter, crescendoLevel, decrescendoLevel, muteState, mutedMeter, tempo, balance, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
+  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, beatReadout, threeBeatReadout, waveform, baseTone, audibleMeter, crescendoLevel, decrescendoLevel, muteState, mutedMeter, tempo, balance, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
 } finally {
   await browser.close();
 }
