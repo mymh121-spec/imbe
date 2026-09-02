@@ -71,7 +71,7 @@ describe('camera baton overlay', () => {
     expect(overlay?.anchor).toEqual({ x: 20, y: 30 });
     expect(overlay?.direction.x).toBeCloseTo(0);
     expect(overlay?.direction.y).toBeCloseTo(-1);
-    expect(overlay?.markerSize).toBeCloseTo(20);
+    expect(overlay?.gripScale).toBeCloseTo(20);
   });
 
   it('averages multiple marker centers into one hand anchor', () => {

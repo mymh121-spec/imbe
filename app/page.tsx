@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, AudioLines, Camera, CameraOff, Crosshair, Eye, EyeOff, FileAudio,
-  MousePointer2, Pause, Play, Printer, Radio, Repeat2, Square,
+  Hand, MousePointer2, Pause, Play, Printer, Radio, Repeat2, ScanLine, Square,
   TestTube2, Upload,
 } from 'lucide-react';
 import { BatonStage } from '@/components/baton-stage';
@@ -19,11 +19,13 @@ import {
   CalibrationManager, DEFAULT_CALIBRATION, printMarkerSheet, type CalibrationSettings,
 } from '@/modules/calibration';
 import { DEFAULT_MAPPING, mapGesture, type MappingSettings } from '@/modules/gestureMapping';
+import { HandDetection, type HandDetectorState } from '@/modules/handDetection';
 import { MarkerDetection } from '@/modules/markerDetection';
 import { estimateBoardPose } from '@/modules/poseEstimation';
 import type { BatonFrame, BatonPose, BoardPose, MappingOutput } from '@/modules/types';
 
 type InputMode = 'simulation' | 'camera';
+type CameraTrackingMode = 'hand' | 'marker';
 
 const INITIAL_FRAME: BatonFrame = {
   position: { x: 0, y: 0, z: 0.5 },
@@ -47,6 +49,13 @@ const CAMERA_LABELS: Record<CameraState, string> = {
   denied: '카메라 권한 거부됨',
   unavailable: '사용 가능한 카메라 없음',
   error: '카메라 연결 오류',
+};
+
+const HAND_STATE_LABELS: Record<HandDetectorState, string> = {
+  idle: '손 모델 대기',
+  loading: '손 모델 준비 중',
+  ready: '손 미검출',
+  error: '손 모델 오류',
 };
 
 function numberText(value: number, digits = 2) {
@@ -85,10 +94,12 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<CameraInput | null>(null);
   const detectorRef = useRef<MarkerDetection | null>(null);
+  const handDetectorRef = useRef<HandDetection | null>(null);
   const calibrationRef = useRef<CalibrationManager | null>(null);
   const controllerRef = useRef<BatonController | null>(null);
   const audioRef = useRef<AudioEngine | null>(null);
   const modeRef = useRef<InputMode>('simulation');
+  const trackingModeRef = useRef<CameraTrackingMode>('hand');
   const cameraStateRef = useRef<CameraState>('off');
   const simulationPoseRef = useRef<BatonPose | null>(null);
   const cameraPoseRef = useRef<BatonPose | null>(null);
@@ -99,8 +110,12 @@ export default function Home() {
   const lastUiUpdateRef = useRef(0);
 
   const [mode, setMode] = useState<InputMode>('simulation');
+  const [trackingMode, setTrackingMode] = useState<CameraTrackingMode>('hand');
   const [cameraState, setCameraState] = useState<CameraState>('off');
   const [markerIds, setMarkerIds] = useState<number[]>([]);
+  const [handState, setHandState] = useState<HandDetectorState>('idle');
+  const [handDetected, setHandDetected] = useState(false);
+  const [handedness, setHandedness] = useState<string | null>(null);
   const [detectionMs, setDetectionMs] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(true);
   const [frame, setFrame] = useState<BatonFrame>(INITIAL_FRAME);
@@ -120,11 +135,13 @@ export default function Home() {
   useEffect(() => {
     const camera = new CameraInput();
     const detector = new MarkerDetection();
+    const handDetector = new HandDetection();
     const calibration = new CalibrationManager();
     const controller = new BatonController();
     const audio = new AudioEngine();
     cameraRef.current = camera;
     detectorRef.current = detector;
+    handDetectorRef.current = handDetector;
     calibrationRef.current = calibration;
     controllerRef.current = controller;
     audioRef.current = audio;
@@ -135,24 +152,36 @@ export default function Home() {
     let animationFrame = 0;
     const tick = (now: number) => {
       const activeMode = modeRef.current;
+      const activeTrackingMode = trackingModeRef.current;
       if (
         cameraStateRef.current === 'ready' &&
         videoRef.current &&
-        detectorRef.current &&
-        now - lastDetectionRef.current > 70
+        now - lastDetectionRef.current > (activeTrackingMode === 'hand' ? 55 : 70)
       ) {
         lastDetectionRef.current = now;
-        const detection = detectorRef.current.detect(videoRef.current, previewRef.current ?? undefined);
-        if (detection) {
-          const configured = calibrationSettingsRef.current;
-          const relevant = detection.markers.filter((marker) => configured.markers.some((item) => item.id === marker.id));
-          setMarkerIds(relevant.map((marker) => marker.id));
-          setDetectionMs(detection.durationMs);
-          const intrinsics = calibration.getIntrinsics(detection.width, detection.height);
-          const boardPose = estimateBoardPose(relevant, configured.markers, configured.markerSizeMm, intrinsics, now);
-          if (boardPose) {
-            lastBoardPoseRef.current = boardPose;
-            cameraPoseRef.current = calibration.normalize(boardPose);
+        if (activeTrackingMode === 'hand' && handDetectorRef.current) {
+          const detection = handDetectorRef.current.detect(videoRef.current, previewRef.current ?? undefined, now);
+          if (detection) {
+            setHandDetected(detection.handCount > 0);
+            setHandedness(detection.handedness);
+            setMarkerIds([]);
+            setDetectionMs(detection.durationMs);
+            if (detection.pose) cameraPoseRef.current = detection.pose;
+          }
+        } else if (detectorRef.current) {
+          const detection = detectorRef.current.detect(videoRef.current, previewRef.current ?? undefined);
+          if (detection) {
+            const configured = calibrationSettingsRef.current;
+            const relevant = detection.markers.filter((marker) => configured.markers.some((item) => item.id === marker.id));
+            setMarkerIds(relevant.map((marker) => marker.id));
+            setHandDetected(false);
+            setDetectionMs(detection.durationMs);
+            const intrinsics = calibration.getIntrinsics(detection.width, detection.height);
+            const boardPose = estimateBoardPose(relevant, configured.markers, configured.markerSizeMm, intrinsics, now);
+            if (boardPose) {
+              lastBoardPoseRef.current = boardPose;
+              cameraPoseRef.current = calibration.normalize(boardPose);
+            }
           }
         }
       }
@@ -179,6 +208,7 @@ export default function Home() {
     return () => {
       cancelAnimationFrame(animationFrame);
       camera.stop();
+      handDetector.close();
       audio.dispose();
     };
   }, []);
@@ -196,6 +226,36 @@ export default function Home() {
     modeRef.current = next;
   };
 
+  const prepareHandDetector = useCallback(async () => {
+    const detector = handDetectorRef.current;
+    if (!detector) return;
+    if (detector.state === 'ready') {
+      setHandState('ready');
+      return;
+    }
+    setHandState('loading');
+    try {
+      await detector.initialize();
+      setHandState(detector.state);
+    } catch {
+      setHandState('error');
+    }
+  }, []);
+
+  const changeTrackingMode = (next: CameraTrackingMode) => {
+    trackingModeRef.current = next;
+    setTrackingMode(next);
+    setMarkerIds([]);
+    setHandDetected(false);
+    setHandedness(null);
+    setDetectionMs(0);
+    cameraPoseRef.current = null;
+    if (cameraStateRef.current === 'ready') {
+      changeMode('camera');
+      if (next === 'hand') void prepareHandDetector();
+    }
+  };
+
   const toggleCamera = async () => {
     const camera = cameraRef.current;
     const video = videoRef.current;
@@ -205,6 +265,8 @@ export default function Home() {
       cameraStateRef.current = 'off';
       setCameraState('off');
       setMarkerIds([]);
+      setHandDetected(false);
+      setHandedness(null);
       cameraPoseRef.current = null;
       changeMode('simulation');
       return;
@@ -214,7 +276,10 @@ export default function Home() {
     const next = await camera.start(video);
     cameraStateRef.current = next;
     setCameraState(next);
-    if (next === 'ready') changeMode('camera');
+    if (next === 'ready') {
+      changeMode('camera');
+      if (trackingModeRef.current === 'hand') void prepareHandDetector();
+    }
   };
 
   const updateMapping = <K extends keyof MappingSettings>(key: K, value: MappingSettings[K]) => {
@@ -283,15 +348,23 @@ export default function Home() {
     setTrackInfo(audioRef.current?.getTrackInfo() ?? trackInfo);
   };
 
+  const cameraTrackingActive = trackingMode === 'hand' ? handDetected : markerIds.length > 0;
+  const handTrackingLabel = handDetected
+    ? `${handedness === 'Left' ? '왼손' : handedness === 'Right' ? '오른손' : '손'} 추적 중`
+    : HAND_STATE_LABELS[handState];
   const trackingLabel = mode === 'simulation'
     ? '시뮬레이션 입력'
     : cameraState !== 'ready'
       ? CAMERA_LABELS[cameraState]
-      : markerIds.length
-        ? `${markerIds.length}개 마커 추적 중`
-        : '마커 미검출';
+      : trackingMode === 'hand'
+        ? handTrackingLabel
+        : markerIds.length
+          ? `${markerIds.length}개 마커 추적 중`
+          : '마커 미검출';
 
-  const statusTone = mode === 'simulation' || markerIds.length ? 'ok' : cameraState === 'denied' || cameraState === 'error' ? 'error' : 'warn';
+  const statusTone = mode === 'simulation' || cameraTrackingActive
+    ? 'ok'
+    : cameraState === 'denied' || cameraState === 'error' || handState === 'error' ? 'error' : 'warn';
 
   return (
     <TooltipProvider>
@@ -342,7 +415,11 @@ export default function Home() {
               </TabsList>
 
               <TabsContent value="input" className="tab-body">
-                <div className="section-title"><div><span className="eyebrow">CAMERA</span><h2>마커 입력</h2></div><Camera size={17} /></div>
+                <div className="section-title"><div><span className="eyebrow">CAMERA</span><h2>손 · 마커 입력</h2></div><Camera size={17} /></div>
+                <div className="tracking-source-switch" aria-label="카메라 추적 방식">
+                  <button className={trackingMode === 'hand' ? 'active' : ''} aria-pressed={trackingMode === 'hand'} onClick={() => changeTrackingMode('hand')}><Hand />손 추적</button>
+                  <button className={trackingMode === 'marker' ? 'active' : ''} aria-pressed={trackingMode === 'marker'} onClick={() => changeTrackingMode('marker')}><ScanLine />마커 추적</button>
+                </div>
                 <div className={`camera-preview ${previewVisible ? '' : 'is-hidden'}`}>
                   {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- Muted camera frames contain no audio. */}
                   <video ref={videoRef} muted playsInline aria-hidden="true" />
@@ -361,7 +438,7 @@ export default function Home() {
                 </div>
                 <dl className="status-list">
                   <div><dt>장치</dt><dd className={cameraState === 'ready' ? 'text-ok' : ''}>{CAMERA_LABELS[cameraState]}</dd></div>
-                  <div><dt>마커 ID</dt><dd>{markerIds.length ? markerIds.join(', ') : '없음'}</dd></div>
+                  <div><dt>{trackingMode === 'hand' ? '손 추적' : '마커 ID'}</dt><dd>{trackingMode === 'hand' ? handTrackingLabel : markerIds.length ? markerIds.join(', ') : '없음'}</dd></div>
                   <div><dt>검출 시간</dt><dd>{detectionMs ? `${detectionMs.toFixed(1)} ms` : '—'}</dd></div>
                 </dl>
                 <div className="orientation-grid">

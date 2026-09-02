@@ -71,7 +71,11 @@ const runtimeErrors = [];
 const responseErrors = [];
 page.on('pageerror', (error) => runtimeErrors.push(error.message));
 page.on('console', (message) => {
-  if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) runtimeErrors.push(message.text());
+  const messageText = message.text();
+  const informationalMediaPipeLog = messageText.includes('Created TensorFlow Lite XNNPACK delegate for CPU');
+  if (message.type() === 'error' && !messageText.startsWith('Failed to load resource:') && !informationalMediaPipeLog) {
+    runtimeErrors.push(messageText);
+  }
 });
 page.on('response', (response) => {
   if (response.status() >= 400) responseErrors.push(`${response.status()} ${response.url()}`);
@@ -141,9 +145,22 @@ try {
   if (await page.getByRole('button', { name: '일시정지' }).isDisabled()) throw new Error('Audio playback did not enter playing state');
 
   await page.getByRole('button', { name: '카메라 켜기' }).click();
-  await page.waitForTimeout(1600);
+  await page.waitForTimeout(800);
   const cameraState = await page.locator('.status-list dd').first().textContent();
   if (!cameraState?.includes('준비')) throw new Error(`Camera did not reach ready state: ${cameraState}`);
+
+  await page.waitForFunction(
+    () => document.querySelectorAll('.status-list dd')[1]?.textContent?.includes('손 미검출'),
+    undefined,
+    { timeout: 20_000 },
+  );
+  const handModelState = await page.locator('.status-list dd').nth(1).textContent();
+  const mediaPipeAssets = await page.evaluate(() => performance.getEntriesByType('resource')
+    .map((entry) => entry.name)
+    .filter((name) => name.includes('/mediapipe/'))
+    .map((name) => new URL(name).pathname));
+  await page.getByRole('button', { name: '마커 추적' }).click();
+  await page.waitForTimeout(1600);
 
   const markerReadout = await page.locator('.status-list dd').nth(1).textContent();
   if (!markerReadout?.includes('0') || !markerReadout.includes('1') || !markerReadout.includes('2')) {
@@ -168,7 +185,7 @@ try {
   if (runtimeErrors.length || responseErrors.length) {
     throw new Error(`Runtime errors: ${[...runtimeErrors, ...responseErrors].join(' | ')}`);
   }
-  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, cameraState, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
+  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
 } finally {
   await browser.close();
 }
