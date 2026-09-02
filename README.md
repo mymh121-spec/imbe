@@ -126,3 +126,5 @@ WASM과 `hand_landmarker.task` 모델은 `public/mediapipe`에 포함되어 있�
 - 새로고침 후 기본 화면과 저장된 보정값이 오류 없이 복원되는지 확인
 
 실제 카메라와 인쇄 마커가 필요한 하드웨어 검증 및 고도화 항목은 [`FUTURE.md`](./FUTURE.md)에 별도로 관리합니다.
+
+박자 인식과 손 제스처 명령을 딥러닝으로 확장하는 설계는 [`chuhu.md`](./chuhu.md)에 정리했습니다.
