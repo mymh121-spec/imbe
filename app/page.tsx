@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity, AudioLines, Camera, CameraOff, Crosshair, Eye, EyeOff, FileAudio,
   Hand, MousePointer2, Pause, Play, Printer, Radio, Repeat2, ScanLine, Square,
-  TestTube2, Upload,
+  TestTube2, Triangle, Upload, Waves,
 } from 'lucide-react';
 import { BatonStage } from '@/components/baton-stage';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { AudioEngine, type AudioPlaybackState } from '@/modules/audioEngine';
+import { AudioEngine, type AudioPlaybackState, type SynthWaveform } from '@/modules/audioEngine';
 import { BatonController } from '@/modules/batonController';
 import { CameraInput, type CameraState } from '@/modules/cameraInput';
 import {
@@ -124,6 +124,7 @@ export default function Home() {
   const [calibrationSettings, setCalibrationSettings] = useState<CalibrationSettings>(DEFAULT_CALIBRATION);
   const [calibrationMessage, setCalibrationMessage] = useState('영점 미설정');
   const [playback, setPlayback] = useState<AudioPlaybackState>('stopped');
+  const [waveform, setWaveform] = useState<SynthWaveform>('sine');
   const [loop, setLoop] = useState(true);
   const [trackInfo, setTrackInfo] = useState([
     { name: 'Pulse 110', level: 0.34, hasFile: false },
@@ -343,8 +344,11 @@ export default function Home() {
     void audioRef.current?.ensureReady().then(() => audioRef.current?.setTrackGain(index, value));
   };
 
-  const useTestTones = () => {
-    audioRef.current?.useTestTones();
+  const selectWaveform = async (nextWaveform: SynthWaveform) => {
+    audioRef.current?.useTestTones(nextWaveform);
+    setWaveform(nextWaveform);
+    await audioRef.current?.play();
+    setPlayback(audioRef.current?.state ?? 'stopped');
     setTrackInfo(audioRef.current?.getTrackInfo() ?? trackInfo);
   };
 
@@ -504,11 +508,19 @@ export default function Home() {
                 <IconAction label="정지" onClick={handleStop} disabled={playback === 'stopped'}><Square /></IconAction>
                 <div className="loop-control"><Repeat2 /><span>반복</span><Switch aria-label="반복 재생" checked={loop} onCheckedChange={(checked) => { setLoop(checked); audioRef.current?.setLoop(checked); }} /></div>
               </div>
+              <div className="waveform-control">
+                <span className="waveform-label">TEST WAVE</span>
+                <div className="waveform-buttons" aria-label="테스트 합성음 파형">
+                  <button className={waveform === 'sine' ? 'active' : ''} onClick={() => void selectWaveform('sine')}><Waves />사인파</button>
+                  <button className={waveform === 'triangle' ? 'active' : ''} onClick={() => void selectWaveform('triangle')}><Triangle />삼각파</button>
+                  <button className={waveform === 'square' ? 'active' : ''} onClick={() => void selectWaveform('square')}><Square />사각파</button>
+                </div>
+              </div>
               <Meter value={audioMeter} tone="coral" />
               <div className="button-row wrap">
                 <input ref={fileInputRef} className="visually-hidden" type="file" accept="audio/*" multiple onChange={(event) => void handleFiles(event.target.files)} />
                 <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload data-icon="inline-start" />오디오 불러오기</Button>
-                <Button variant="outline" onClick={useTestTones}><TestTube2 data-icon="inline-start" />테스트톤</Button>
+                <Button variant="outline" onClick={() => void selectWaveform('sine')}><TestTube2 data-icon="inline-start" />테스트톤</Button>
               </div>
               <div className="master-values">
                 <span><small>MASTER</small><b>{Math.round(mapped.masterGain * 100)}%</b></span>

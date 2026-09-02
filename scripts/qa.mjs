@@ -143,6 +143,10 @@ try {
   await page.getByRole('button', { name: '재생' }).click();
   await page.waitForTimeout(250);
   if (await page.getByRole('button', { name: '일시정지' }).isDisabled()) throw new Error('Audio playback did not enter playing state');
+  await page.getByRole('button', { name: '사각파' }).click();
+  await page.waitForTimeout(180);
+  const waveform = await page.locator('.waveform-buttons button.active').textContent();
+  if (!waveform?.includes('사각파')) throw new Error(`Waveform selection did not activate: ${waveform}`);
 
   await page.getByRole('button', { name: '카메라 켜기' }).click();
   await page.waitForTimeout(800);
@@ -185,7 +189,7 @@ try {
   if (runtimeErrors.length || responseErrors.length) {
     throw new Error(`Runtime errors: ${[...runtimeErrors, ...responseErrors].join(' | ')}`);
   }
-  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
+  console.log(JSON.stringify({ desktopCanvas, mobileCanvas, xReadout, waveform, cameraState, handModelState, mediaPipeAssets, markerReadout, cameraOverlay, runtimeErrors, responseErrors }, null, 2));
 } finally {
   await browser.close();
 }

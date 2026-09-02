@@ -1,6 +1,7 @@
 import type { MappingOutput } from './types';
 
 export type AudioPlaybackState = 'stopped' | 'playing' | 'paused';
+export type SynthWaveform = 'sine' | 'triangle' | 'square';
 
 type TrackChain = {
   gain: GainNode;
@@ -29,9 +30,11 @@ export class AudioEngine {
   private startedAt = 0;
   private requestedMasterGain = 0.5;
   private duckUntil = 0;
+  private synthWaveform: SynthWaveform = 'sine';
 
   get state() { return this.playbackState; }
   get isLooping() { return this.loop; }
+  get waveform() { return this.synthWaveform; }
 
   getTrackInfo() {
     return Array.from({ length: 3 }, (_, index) => ({
@@ -88,7 +91,8 @@ export class AudioEngine {
     if (wasPlaying) this.startSources(this.pausedOffset);
   }
 
-  useTestTones() {
+  useTestTones(waveform: SynthWaveform = this.synthWaveform) {
+    this.synthWaveform = waveform;
     this.tracks.forEach((track, index) => {
       track.buffer = null;
       track.name = SYNTH_NAMES[index];
@@ -187,7 +191,7 @@ export class AudioEngine {
         track.source = source;
       } else {
         const oscillator = this.context!.createOscillator();
-        oscillator.type = index === 1 ? 'triangle' : 'sine';
+        oscillator.type = this.synthWaveform;
         oscillator.frequency.value = SYNTH_FREQUENCIES[index];
         oscillator.connect(track.gain);
         oscillator.start();

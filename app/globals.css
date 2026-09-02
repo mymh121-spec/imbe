@@ -153,6 +153,12 @@ button:disabled { cursor: not-allowed; }
 .transport { display: flex; align-items: center; gap: 6px; margin: 13px 0 11px; }
 .loop-control { min-width: 95px; height: 32px; margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 7px; color: #9aabb3; font-size: 9px; }
 .loop-control > svg { width: 13px; }
+.waveform-control { margin-bottom: 12px; }
+.waveform-label { display: block; margin-bottom: 6px; color: #72858e; font: 700 8px var(--font-mono); }
+.waveform-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.waveform-buttons button { min-width: 0; height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 4px; overflow: hidden; border: 1px solid #30414a; color: #aebdc4; background: #121b20; border-radius: 4px; font-size: 9px; white-space: nowrap; }
+.waveform-buttons button svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.waveform-buttons button.active { border-color: #6cc9ff; color: #081116; background: #6cc9ff; }
 .meter { height: 5px; display: block; overflow: hidden; background: #25333a; border-radius: 2px; }
 .meter i { display: block; height: 100%; border-radius: inherit; transition: width 80ms linear; }
 .tone-cyan i { background: #6cc9ff; }
